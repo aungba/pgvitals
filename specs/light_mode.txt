@@ -1,0 +1,14 @@
+--bg:              #F6F8FA;  /* cool, slightly blue-gray off-white — not cream */
+--surface:         #FFFFFF;
+--surface-alt:     #EDF1F5;  /* cards, table stripes */
+--border:          #D8E0E8;
+--text-primary:    #14202B;  /* deep slate navy, not pure black */
+--text-secondary:  #4C5D6B;
+
+--brand:           #1D6F8C;  /* Pulse Teal — nods to Postgres' own blue heritage, shifted distinct */
+--brand-strong:    #14536A;  /* hover/active states */
+
+--signal-healthy:  #1F9D6B;  /* calm green — normal connection activity */
+--signal-idle:     #7C6FC9;  /* muted violet — idle-in-transaction, your core wedge, deserves its own color */
+--signal-warning:  #C98A1B;  /* warm amber — approaching thresholds */
+--signal-critical: #C24B3F;  /* warm coral-red — blocking chains, near max_connections */

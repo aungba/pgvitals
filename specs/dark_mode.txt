@@ -1,0 +1,14 @@
+--bg:              #0B1420;  /* deep navy-black — monitor-screen feel, not flat black */
+--surface:         #121D2B;
+--surface-alt:     #182534;
+--border:          #24354A;
+--text-primary:    #E7EEF3;
+--text-secondary:  #94A7B8;
+
+--brand:           #4FB8D6;  /* brighter cyan-teal for legibility on dark */
+--brand-strong:    #7ED0E8;
+
+--signal-healthy:  #3ECF8E;
+--signal-idle:     #A79AE0;
+--signal-warning:  #E3A83B;
+--signal-critical: #E2685A;

@@ -1,0 +1,78 @@
+import {
+  pgTable,
+  uuid,
+  varchar,
+  integer,
+  timestamp,
+  jsonb,
+  doublePrecision,
+  bigint,
+  text,
+  primaryKey,
+  index,
+} from "drizzle-orm/pg-core";
+import { monitoredDatabases } from "./organizations.js";
+
+/* ===================================================================
+   Query Performance Schema — Phase 4
+   =================================================================== */
+
+/**
+ * Query stats table — stores per-query-fingerprint metrics from pg_stat_statements.
+ * Will be converted to a TimescaleDB hypertable via migration SQL.
+ *
+ * Stores DELTA metrics (diff between consecutive polls), not cumulative.
+ * Uses composite primary key (id + captured_at) for TimescaleDB partitioning.
+ */
+export const queryStats = pgTable(
+  "query_stats",
+  {
+    id: uuid("id").defaultRandom().notNull(),
+    monitoredDbId: uuid("monitored_db_id")
+      .references(() => monitoredDatabases.id, { onDelete: "cascade" })
+      .notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    queryid: bigint("queryid", { mode: "number" }).notNull(),
+    queryText: varchar("query_text", { length: 2000 }).notNull(),
+    calls: integer("calls").notNull(),
+    totalTimeMs: doublePrecision("total_time_ms").notNull(),
+    meanTimeMs: doublePrecision("mean_time_ms").notNull(),
+    maxTimeMs: doublePrecision("max_time_ms").notNull(),
+    minTimeMs: doublePrecision("min_time_ms").notNull(),
+    rowsReturned: bigint("rows_returned", { mode: "number" }).notNull(),
+    sharedBlksHit: bigint("shared_blks_hit", { mode: "number" })
+      .default(0)
+      .notNull(),
+    sharedBlksRead: bigint("shared_blks_read", { mode: "number" })
+      .default(0)
+      .notNull(),
+    pctOfTotalTime: doublePrecision("pct_of_total_time")
+      .default(0)
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.capturedAt] }),
+    index("idx_query_stats_dbid_queryid").on(table.monitoredDbId, table.queryid),
+  ]
+);
+
+/**
+ * Explain captures — stores on-demand EXPLAIN results.
+ * Regular table with UUID primary key (not a hypertable).
+ */
+export const explainCaptures = pgTable("explain_captures", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  monitoredDbId: uuid("monitored_db_id")
+    .references(() => monitoredDatabases.id, { onDelete: "cascade" })
+    .notNull(),
+  queryid: bigint("queryid", { mode: "number" }).notNull(),
+  queryText: text("query_text").notNull(),
+  planJson: jsonb("plan_json").notNull(),
+  planText: text("plan_text"),
+  warnings: jsonb("warnings").default([]).notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});

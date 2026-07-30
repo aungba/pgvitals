@@ -1,0 +1,34 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: pgvitals-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: pgvitals
+      POSTGRES_PASSWORD: pgvitals_dev
+      POSTGRES_DB: pgvitals
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgvitals"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: pgvitals-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  timescaledb_data:
+  redis_data:
