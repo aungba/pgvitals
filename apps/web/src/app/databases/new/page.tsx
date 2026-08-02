@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createDatabase } from "../../lib/api";
 
 /* ===================================================================
@@ -141,9 +142,9 @@ export default function AddDatabasePage() {
                 "Add Database"
               )}
             </button>
-            <a href="/" className="btn-secondary">
+            <Link href="/" className="btn-secondary">
               Cancel
-            </a>
+            </Link>
           </div>
         </form>
       </div>

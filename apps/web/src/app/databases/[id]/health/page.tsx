@@ -2,15 +2,22 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
   getDatabase,
   getVacuumStats,
   getDbHealth,
+  getTableCacheHit,
+  getDiskGrowth,
+  getReplicationStats,
 } from "../../../lib/api";
 import type {
   Database,
   TableBloatStat,
   DbHealthSnapshot,
+  TableCacheHit,
+  TableSizeEntry,
+  ReplicationSnapshot,
 } from "../../../lib/api";
 import {
   LineChart,
@@ -77,6 +84,9 @@ export default function HealthPage() {
   const [health, setHealth] = useState<DbHealthSnapshot | null>(null);
   const [healthHistory, setHealthHistory] = useState<DbHealthSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cacheHitTables, setCacheHitTables] = useState<TableCacheHit[]>([]);
+  const [diskGrowthTables, setDiskGrowthTables] = useState<TableSizeEntry[]>([]);
+  const [replicas, setReplicas] = useState<ReplicationSnapshot[]>([]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -89,6 +99,19 @@ export default function HealthPage() {
       setTables(vacuumData.tables);
       setHealth(healthData.current);
       setHealthHistory(healthData.history);
+      // Fetch cache hit and disk growth data
+      try {
+        const [cacheData, growthData, replData] = await Promise.all([
+          getTableCacheHit(id),
+          getDiskGrowth(id),
+          getReplicationStats(id),
+        ]);
+        setCacheHitTables(cacheData.tables);
+        setDiskGrowthTables(growthData.tables);
+        setReplicas(replData.replicas);
+      } catch {
+        // optional data
+      }
     } catch {
       // ignore
     } finally {
@@ -121,7 +144,7 @@ export default function HealthPage() {
       {/* Header */}
       <div className="detail-header">
         <div className="detail-header-left">
-          <a
+          <Link
             href={`/databases/${id}`}
             style={{
               display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -129,7 +152,7 @@ export default function HealthPage() {
               background: "var(--surface-alt)", border: "1px solid var(--border)",
               color: "var(--text-secondary)", fontSize: "1rem", flexShrink: 0,
             }}
-          >←</a>
+          >←</Link>
           <div>
             <h1>Health — {database?.name}</h1>
             <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginTop: 2 }}>
@@ -192,6 +215,44 @@ export default function HealthPage() {
             color={(health.checkpointsRequested ?? 0) > (health.checkpointsTimed ?? 0) ? "var(--signal-warning)" : "var(--signal-healthy)"}
             hint="Timed / Requested"
           />
+          <HealthGauge
+            icon="☢️"
+            label="XID Wraparound"
+            value={health.xidPercentUsed != null ? `${health.xidPercentUsed.toFixed(1)}%` : "—"}
+            color={
+              (health.xidPercentUsed ?? 0) > 80 ? "var(--signal-critical)"
+                : (health.xidPercentUsed ?? 0) > 50 ? "var(--signal-warning)"
+                  : "var(--signal-healthy)"
+            }
+            hint={
+              (health.xidPercentUsed ?? 0) > 80 ? "Critical — force VACUUM FREEZE"
+                : health.xidAge != null && health.autovacuumFreezeMaxAge != null
+                  ? `${formatNumber(health.xidAge)} / ${formatNumber(health.autovacuumFreezeMaxAge)}`
+                  : "No data"
+            }
+          />
+        </div>
+      )}
+
+      {/* ---- XID Wraparound Warning Banner ---- */}
+      {health && (health.xidPercentUsed ?? 0) > 50 && (
+        <div style={{
+          padding: "var(--space-md) var(--space-lg)",
+          marginBottom: "var(--space-lg)",
+          borderRadius: "var(--radius-md)",
+          background: (health.xidPercentUsed ?? 0) > 80 ? "var(--signal-critical-dim)" : "var(--signal-warning-dim)",
+          borderLeft: `3px solid ${(health.xidPercentUsed ?? 0) > 80 ? "var(--signal-critical)" : "var(--signal-warning)"}`,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 4, color: (health.xidPercentUsed ?? 0) > 80 ? "var(--signal-critical)" : "var(--signal-warning)" }}>
+            ☢️ Transaction ID Wraparound Risk: {health.xidPercentUsed?.toFixed(1)}%
+          </div>
+          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+            Your database has consumed {health.xidAge != null ? formatNumber(health.xidAge) : "?"} of {health.autovacuumFreezeMaxAge != null ? formatNumber(health.autovacuumFreezeMaxAge) : "?"} available
+            transaction IDs. {(health.xidPercentUsed ?? 0) > 80
+              ? "At this level, PostgreSQL may force a shutdown to prevent data corruption."
+              : "Approaching dangerous levels."}
+            {" "}Run <code style={{ background: "var(--surface-alt)", padding: "1px 4px", borderRadius: 3, fontFamily: "var(--font-mono)", fontSize: "0.85em" }}>VACUUM FREEZE</code> on large tables to reduce XID age.
+          </div>
         </div>
       )}
 
@@ -374,6 +435,195 @@ export default function HealthPage() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ---- Per-Table Cache Hit Ratio ---- */}
+      {cacheHitTables.length > 0 && (
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <div className="section-title" style={{ marginBottom: "var(--space-md)" }}>Per-Table Cache Hit Ratio</div>
+          <div className="glass-card-static" style={{ overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th className="alert-table-th">Table</th>
+                  <th className="alert-table-th" style={{ width: 100 }}>Cache Hit %</th>
+                  <th className="alert-table-th" style={{ width: 120 }}>Index Cache %</th>
+                  <th className="alert-table-th" style={{ width: 80 }}>Size</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cacheHitTables.map((t) => {
+                  const hitColor = (t.cacheHitRatio ?? 0) >= 99 ? "var(--signal-healthy)"
+                    : (t.cacheHitRatio ?? 0) >= 95 ? "var(--signal-warning)"
+                      : "var(--signal-critical)";
+                  const idxColor = (t.idxCacheHitRatio ?? 0) >= 99 ? "var(--signal-healthy)"
+                    : (t.idxCacheHitRatio ?? 0) >= 95 ? "var(--signal-warning)"
+                      : "var(--signal-critical)";
+                  return (
+                    <tr key={t.tableName} className="alert-table-row">
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
+                        {t.tableName}
+                      </td>
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: t.cacheHitRatio != null ? hitColor : "var(--text-muted)" }}>
+                        {t.cacheHitRatio != null ? `${t.cacheHitRatio.toFixed(1)}%` : "—"}
+                      </td>
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: t.idxCacheHitRatio != null ? idxColor : "var(--text-muted)" }}>
+                        {t.idxCacheHitRatio != null ? `${t.idxCacheHitRatio.toFixed(1)}%` : "—"}
+                      </td>
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                        {formatBytes(t.totalSizeBytes)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ---- Disk Growth Forecast ---- */}
+      {diskGrowthTables.length > 0 && (
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
+            <div className="section-title" style={{ marginBottom: 0 }}>Disk Growth Forecast</div>
+            {diskGrowthTables.some((t) => (t.projectedDaysToDiskLimit ?? Infinity) <= 30) && (
+              <span style={{ color: "var(--signal-critical)", fontWeight: 600, fontSize: "0.8rem" }}>
+                🔴 Table(s) projected to hit disk limit within 30 days
+              </span>
+            )}
+          </div>
+          <div className="glass-card-static" style={{ overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th className="alert-table-th">Table</th>
+                  <th className="alert-table-th" style={{ width: 100 }}>Current Size</th>
+                  <th className="alert-table-th" style={{ width: 110 }}>Growth / Day</th>
+                  <th className="alert-table-th" style={{ width: 130 }}>Days to Limit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diskGrowthTables.map((t) => {
+                  const daysColor = (t.projectedDaysToDiskLimit ?? Infinity) <= 30 ? "var(--signal-critical)"
+                    : (t.projectedDaysToDiskLimit ?? Infinity) <= 180 ? "var(--signal-warning)"
+                      : "var(--signal-healthy)";
+                  return (
+                    <tr key={t.tableName} className="alert-table-row">
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
+                        {t.tableName}
+                      </td>
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                        {formatBytes(t.totalSizeBytes)}
+                      </td>
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                        {t.growthRateBytesPerDay != null ? `${formatBytes(Math.abs(t.growthRateBytesPerDay))}/d` : "—"}
+                      </td>
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600, color: t.projectedDaysToDiskLimit != null ? daysColor : "var(--text-muted)" }}>
+                        {t.projectedDaysToDiskLimit != null ? `${t.projectedDaysToDiskLimit.toLocaleString()}d` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ---- Replication Lag Monitor ---- */}
+      {replicas.length > 0 && (
+        <div style={{ marginTop: "var(--space-lg)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
+            <div className="section-title" style={{ marginBottom: 0 }}>Replication Lag</div>
+            {replicas.some((r) => r.replicationState !== "streaming") && (
+              <span style={{ color: "var(--signal-critical)", fontWeight: 600, fontSize: "0.8rem" }}>
+                🔴 Replica(s) not in streaming state
+              </span>
+            )}
+          </div>
+          {replicas.some((r) => (r.timeLagSeconds ?? 0) > 30) && (
+            <div style={{
+              padding: "var(--space-md) var(--space-lg)",
+              marginBottom: "var(--space-md)",
+              borderRadius: "var(--radius-md)",
+              background: "var(--signal-critical-dim)",
+              borderLeft: "3px solid var(--signal-critical)",
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--signal-critical)" }}>
+                ⚠️ High Replication Lag Detected
+              </div>
+              <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                One or more replicas have significant replication lag. Reads from these replicas may return stale data.
+                Possible causes: network latency, heavy read load on replica, or a long-running query blocking WAL replay.
+              </div>
+            </div>
+          )}
+          <div className="glass-card-static" style={{ overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th className="alert-table-th">Replica</th>
+                  <th className="alert-table-th" style={{ width: 80 }}>State</th>
+                  <th className="alert-table-th" style={{ width: 100 }}>Byte Lag</th>
+                  <th className="alert-table-th" style={{ width: 100 }}>Time Lag</th>
+                  <th className="alert-table-th" style={{ width: 120 }}>Client</th>
+                </tr>
+              </thead>
+              <tbody>
+                {replicas.map((r) => {
+                  const stateColor = r.replicationState === "streaming" ? "var(--signal-healthy)" : "var(--signal-critical)";
+                  const lagColor = (r.timeLagSeconds ?? 0) > 30 ? "var(--signal-critical)"
+                    : (r.timeLagSeconds ?? 0) > 5 ? "var(--signal-warning)"
+                    : "var(--signal-healthy)";
+                  const byteLagStr = r.byteLag >= 1073741824 ? `${(r.byteLag / 1073741824).toFixed(1)} GB`
+                    : r.byteLag >= 1048576 ? `${(r.byteLag / 1048576).toFixed(1)} MB`
+                    : r.byteLag >= 1024 ? `${(r.byteLag / 1024).toFixed(1)} KB`
+                    : `${r.byteLag} B`;
+                  return (
+                    <tr key={r.id} className="alert-table-row">
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
+                        {r.replicaName}
+                      </td>
+                      <td className="alert-table-td">
+                        <span style={{
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          fontSize: "0.75rem", fontWeight: 600, color: stateColor,
+                          padding: "2px 8px", borderRadius: "var(--radius-full)",
+                          background: r.replicationState === "streaming" ? "var(--signal-healthy-dim)" : "var(--signal-critical-dim)",
+                        }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: stateColor }} />
+                          {r.replicationState}
+                        </span>
+                      </td>
+                      <td className="alert-table-td" style={{
+                        fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600,
+                        color: lagColor,
+                      }}>
+                        {byteLagStr}
+                      </td>
+                      <td className="alert-table-td" style={{
+                        fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600,
+                        color: lagColor,
+                      }}>
+                        {r.timeLagSeconds != null ? (
+                          r.timeLagSeconds < 1 ? `${(r.timeLagSeconds * 1000).toFixed(0)}ms`
+                            : r.timeLagSeconds < 60 ? `${r.timeLagSeconds.toFixed(1)}s`
+                            : `${(r.timeLagSeconds / 60).toFixed(1)}m`
+                        ) : "—"}
+                      </td>
+                      <td className="alert-table-td" style={{
+                        fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-muted)",
+                      }}>
+                        {r.clientAddr ?? "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

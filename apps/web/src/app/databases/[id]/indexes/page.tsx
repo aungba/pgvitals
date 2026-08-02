@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
   getDatabase,
   getIndexRecommendations,
@@ -101,7 +102,7 @@ export default function IndexAdvisorPage() {
       {/* Header */}
       <div className="detail-header">
         <div className="detail-header-left">
-          <a
+          <Link
             href={`/databases/${id}`}
             style={{
               display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -109,7 +110,7 @@ export default function IndexAdvisorPage() {
               background: "var(--surface-alt)", border: "1px solid var(--border)",
               color: "var(--text-secondary)", fontSize: "1rem", flexShrink: 0,
             }}
-          >←</a>
+          >←</Link>
           <div>
             <h1>Index Advisor — {database?.name}</h1>
             <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginTop: 2 }}>

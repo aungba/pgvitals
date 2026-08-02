@@ -44,6 +44,33 @@ export const tableBloatStats = pgTable(
     autovacuumCount: integer("autovacuum_count").default(0).notNull(),
     seqScan: bigint("seq_scan", { mode: "number" }).default(0).notNull(),
     idxScan: bigint("idx_scan", { mode: "number" }).default(0).notNull(),
+    cacheHitRatio: doublePrecision("cache_hit_ratio"),
+    idxCacheHitRatio: doublePrecision("idx_cache_hit_ratio"),
+  },
+  (table) => [primaryKey({ columns: [table.id, table.capturedAt] })]
+);
+
+/**
+ * Table size history — daily snapshots of table sizes for growth forecasting.
+ * TimescaleDB hypertable partitioned by captured_at.
+ */
+export const tableSizeHistory = pgTable(
+  "table_size_history",
+  {
+    id: uuid("id").defaultRandom().notNull(),
+    monitoredDbId: uuid("monitored_db_id")
+      .references(() => monitoredDatabases.id, { onDelete: "cascade" })
+      .notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    tableName: varchar("table_name", { length: 255 }).notNull(),
+    schemaName: varchar("schema_name", { length: 128 }).default("public").notNull(),
+    tableSizeBytes: bigint("table_size_bytes", { mode: "number" }).default(0).notNull(),
+    indexSizeBytes: bigint("index_size_bytes", { mode: "number" }).default(0).notNull(),
+    totalSizeBytes: bigint("total_size_bytes", { mode: "number" }).default(0).notNull(),
+    growthRateBytesPerDay: doublePrecision("growth_rate_bytes_per_day"),
+    projectedDaysToDiskLimit: integer("projected_days_to_disk_limit"),
   },
   (table) => [primaryKey({ columns: [table.id, table.capturedAt] })]
 );
@@ -71,5 +98,8 @@ export const dbHealthSnapshots = pgTable("db_health_snapshots", {
   conflictsCount: integer("conflicts_count"),
   deadlocksCount: integer("deadlocks_count"),
   tempFileBytes: bigint("temp_file_bytes", { mode: "number" }),
+  xidAge: bigint("xid_age", { mode: "number" }),
+  autovacuumFreezeMaxAge: bigint("autovacuum_freeze_max_age", { mode: "number" }),
+  xidPercentUsed: doublePrecision("xid_percent_used"),
   metrics: jsonb("metrics").default({}).notNull(),
 });

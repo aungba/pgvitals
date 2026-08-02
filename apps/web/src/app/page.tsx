@@ -3,6 +3,8 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { getDatabases, getOverview, getActiveAlerts } from "./lib/api";
 import type { Database, OverviewResponse, Alert } from "./lib/api";
+import { useApiToken } from "./lib/useApiToken";
+import Link from "next/link";
 import ConnectionGauge from "./components/ConnectionGauge";
 import StatusBadge from "./components/StatusBadge";
 
@@ -20,16 +22,18 @@ export default function DashboardPage() {
   const [items, setItems] = useState<DbWithOverview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const getToken = useApiToken();
 
   const fetchData = useCallback(async () => {
     try {
-      const databases = await getDatabases();
+      const token = await getToken();
+      const databases = await getDatabases(token);
       const withOverviews = await Promise.all(
         databases.map(async (db) => {
           try {
             const [overview, activeAlerts] = await Promise.all([
-              getOverview(db.id),
-              getActiveAlerts(db.id),
+              getOverview(db.id, token),
+              getActiveAlerts(db.id, token),
             ]);
             return { db, overview, activeAlerts };
           } catch {
@@ -44,7 +48,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getToken]);
 
   useEffect(() => {
     fetchData();
@@ -124,9 +128,9 @@ export default function DashboardPage() {
           <p style={{ marginBottom: "var(--space-lg)" }}>
             Add your first PostgreSQL database to start monitoring
           </p>
-          <a href="/databases/new" className="btn-primary">
+          <Link href="/databases/new" className="btn-primary">
             Add Database
-          </a>
+          </Link>
         </div>
       </div>
     );
@@ -153,7 +157,7 @@ export default function DashboardPage() {
           const hasCritical = activeAlerts.some((a) => a.severity === "critical");
 
           return (
-            <a
+            <Link
               key={db.id}
               href={`/databases/${db.id}`}
               className="glass-card db-card"
@@ -191,7 +195,7 @@ export default function DashboardPage() {
                   {utilization}% utilized
                 </span>
               </div>
-            </a>
+            </Link>
           );
         })}
       </div>

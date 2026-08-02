@@ -12,6 +12,9 @@ export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   planTier: planTierEnum("plan_tier").default("free").notNull(),
+  clerkOrgId: varchar("clerk_org_id", { length: 255 }).unique(),
+  stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
+  stripeSubscriptionId: varchar("stripe_subscription_id", { length: 255 }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -25,6 +28,7 @@ export const users = pgTable("users", {
     .references(() => organizations.id, { onDelete: "cascade" })
     .notNull(),
   email: varchar("email", { length: 255 }).notNull().unique(),
+  clerkUserId: varchar("clerk_user_id", { length: 255 }).unique(),
   role: userRoleEnum("role").default("member").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()

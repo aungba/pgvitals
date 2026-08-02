@@ -9,11 +9,14 @@ import {
   getQueryStatsStatus,
   captureExplainPlan,
   getExplainCaptures,
+  getQuerySuggestions,
+  dismissQuerySuggestion,
 } from "../../../lib/api";
 import type {
   Database,
   QueryStat,
   ExplainCapture,
+  QuerySuggestion,
 } from "../../../lib/api";
 import {
   LineChart,
@@ -25,6 +28,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { useChartColors } from "../../../lib/useChartColors";
+import Link from "next/link";
 
 /* ===================================================================
    Query Performance Page — Phase 4
@@ -67,6 +71,10 @@ export default function QueriesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [explainLoading, setExplainLoading] = useState(false);
 
+  // Suggestions state
+  const [suggestions, setSuggestions] = useState<QuerySuggestion[]>([]);
+  const [showAllSuggestions, setShowAllSuggestions] = useState(false);
+
   const fetchData = useCallback(async () => {
     try {
       const [db, status, result] = await Promise.all([
@@ -78,6 +86,13 @@ export default function QueriesPage() {
       setExtensionAvailable(status.available);
       setQueries(result.queries);
       setLatestCapturedAt(result.latestCapturedAt);
+      // Fetch suggestions
+      try {
+        const sugData = await getQuerySuggestions(id);
+        setSuggestions(sugData.suggestions);
+      } catch {
+        // suggestions are optional
+      }
     } catch {
       // ignore
     } finally {
@@ -152,7 +167,7 @@ export default function QueriesPage() {
       <div className="animate-fade-in">
         <div className="detail-header">
           <div className="detail-header-left">
-            <a
+            <Link
               href={`/databases/${id}`}
               style={{
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -160,7 +175,7 @@ export default function QueriesPage() {
                 background: "var(--surface-alt)", border: "1px solid var(--border)",
                 color: "var(--text-secondary)", fontSize: "1rem", flexShrink: 0,
               }}
-            >←</a>
+            >←</Link>
             <div>
               <h1>Queries — {database?.name}</h1>
             </div>
@@ -198,7 +213,7 @@ export default function QueriesPage() {
       {/* Header */}
       <div className="detail-header">
         <div className="detail-header-left">
-          <a
+          <Link
             href={`/databases/${id}`}
             style={{
               display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -206,7 +221,7 @@ export default function QueriesPage() {
               background: "var(--surface-alt)", border: "1px solid var(--border)",
               color: "var(--text-secondary)", fontSize: "1rem", flexShrink: 0,
             }}
-          >←</a>
+          >←</Link>
           <div>
             <h1>Queries — {database?.name}</h1>
             <p className="text-secondary" style={{ fontSize: "0.9rem" }}>
@@ -221,11 +236,11 @@ export default function QueriesPage() {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: "var(--space-lg)", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "var(--space-lg)", flexWrap: "wrap", minWidth: 0 }}>
         {/* Left: Query List */}
-        <div style={{ flex: "1 1 500px", minWidth: 0 }}>
+        <div style={{ flex: "1 1 500px", minWidth: 0, overflow: "hidden" }}>
           {/* Sort tabs */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-md)", flexWrap: "wrap", gap: "var(--space-sm)" }}>
             <div className="section-title" style={{ marginBottom: 0 }}>Top Queries</div>
             <div className="tab-bar">
               {([
@@ -243,6 +258,117 @@ export default function QueriesPage() {
             </div>
           </div>
 
+          {/* Suggestions Panel */}
+          {suggestions.length > 0 && (() => {
+            const COLLAPSED_LIMIT = 2;
+            const visibleSuggestions = showAllSuggestions ? suggestions : suggestions.slice(0, COLLAPSED_LIMIT);
+            const hiddenCount = suggestions.length - COLLAPSED_LIMIT;
+
+            return (
+              <div style={{ marginBottom: "var(--space-lg)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-sm)" }}>
+                  <div className="section-title" style={{ marginBottom: 0 }}>
+                    Suggestions
+                    <span style={{
+                      background: suggestions.some((s) => s.severity === "critical") ? "var(--signal-critical-dim)" : "var(--signal-warning-dim)",
+                      color: suggestions.some((s) => s.severity === "critical") ? "var(--signal-critical)" : "var(--signal-warning)",
+                      padding: "1px 8px",
+                      borderRadius: "9999px",
+                      fontSize: "0.7rem",
+                      fontWeight: 600,
+                      marginLeft: 8,
+                      textTransform: "none",
+                      letterSpacing: 0,
+                    }}>
+                      {suggestions.length}
+                    </span>
+                  </div>
+                  {suggestions.length > COLLAPSED_LIMIT && (
+                    <button
+                      onClick={() => setShowAllSuggestions(!showAllSuggestions)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--brand)",
+                        cursor: "pointer",
+                        fontSize: "0.8rem",
+                        fontWeight: 500,
+                        padding: "4px 8px",
+                        borderRadius: "var(--radius-sm)",
+                        transition: "all var(--transition-fast)",
+                      }}
+                    >
+                      {showAllSuggestions ? "Show less ▲" : `Show ${hiddenCount} more ▼`}
+                    </button>
+                  )}
+                </div>
+                <div style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--space-sm)",
+                  maxHeight: showAllSuggestions ? 400 : undefined,
+                  overflowY: showAllSuggestions ? "auto" : undefined,
+                }}>
+                  {visibleSuggestions.map((s) => {
+                    const icon = s.suggestionType === "n_plus_one" ? "🔄" : s.suggestionType === "cache_miss" ? "💾" : s.suggestionType === "temp_spill" ? "📝" : "📈";
+                    const borderColor = s.severity === "critical" ? "var(--signal-critical)" : s.severity === "warning" ? "var(--signal-warning)" : "var(--brand)";
+                    return (
+                      <div key={s.id} className="glass-card-static" style={{
+                        padding: "var(--space-sm) var(--space-md)",
+                        borderLeft: `3px solid ${borderColor}`,
+                      }}>
+                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "var(--space-sm)" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                              <span style={{ fontSize: "0.9rem" }}>{icon}</span>
+                              <span style={{ fontWeight: 600, fontSize: "0.8rem" }}>{s.title}</span>
+                            </div>
+                            <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", lineHeight: 1.4 }}>
+                              {s.description}
+                            </div>
+                            {typeof (s.metadata as Record<string, unknown>)?.queryText === "string" && (
+                              <div style={{
+                                marginTop: 4,
+                                padding: "4px 6px",
+                                background: "var(--surface-alt)",
+                                borderRadius: "var(--radius-sm)",
+                                fontFamily: "var(--font-mono)",
+                                fontSize: "0.7rem",
+                                color: "var(--text-muted)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                maxWidth: "100%",
+                              }}>
+                                {String((s.metadata as Record<string, unknown>).queryText)}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              await dismissQuerySuggestion(id, s.id);
+                              setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+                            }}
+                            style={{
+                              background: "none", border: "1px solid var(--border)",
+                              borderRadius: "var(--radius-sm)", padding: "2px 6px",
+                              color: "var(--text-muted)", cursor: "pointer", fontSize: "0.7rem",
+                              flexShrink: 0, whiteSpace: "nowrap",
+                              transition: "all var(--transition-fast)",
+                            }}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           {queries.length === 0 ? (
             <div className="glass-card-static" style={{ padding: "var(--space-xl)", textAlign: "center", color: "var(--text-muted)" }}>
               <div style={{ fontSize: "2rem", marginBottom: 8, opacity: 0.5 }}>📊</div>
@@ -250,6 +376,7 @@ export default function QueriesPage() {
             </div>
           ) : (
             <div className="glass-card-static" style={{ overflow: "hidden" }}>
+              <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
@@ -286,9 +413,27 @@ export default function QueriesPage() {
                       </td>
                       <td className="alert-table-td" style={{
                         fontFamily: "var(--font-mono)",
-                        color: q.meanTimeMs > 100 ? "var(--signal-warning)" : q.meanTimeMs > 1000 ? "var(--signal-critical)" : "var(--text-secondary)",
+                        color: q.meanTimeMs > 1000 ? "var(--signal-critical)" : q.meanTimeMs > 100 ? "var(--signal-warning)" : "var(--text-secondary)",
                       }}>
-                        {formatMs(q.meanTimeMs)}
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          {formatMs(q.meanTimeMs)}
+                          {q.meanTimeTrend != null && Math.abs(q.meanTimeTrend) >= 5 && (
+                            <span style={{
+                              fontSize: "0.65rem",
+                              fontWeight: 700,
+                              padding: "1px 4px",
+                              borderRadius: "var(--radius-sm)",
+                              color: q.meanTimeTrend > 30 ? "var(--signal-critical)"
+                                : q.meanTimeTrend > 0 ? "var(--signal-warning)"
+                                : "var(--signal-healthy)",
+                              background: q.meanTimeTrend > 30 ? "var(--signal-critical-dim)"
+                                : q.meanTimeTrend > 0 ? "var(--signal-warning-dim)"
+                                : "var(--signal-healthy-dim)",
+                            }}>
+                              {q.meanTimeTrend > 0 ? "↑" : "↓"}{Math.abs(q.meanTimeTrend).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="alert-table-td">
                         <div style={{
@@ -316,6 +461,7 @@ export default function QueriesPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>

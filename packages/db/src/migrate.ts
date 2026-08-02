@@ -87,6 +87,26 @@ async function runMigrations() {
     console.log("  ⏭️  table_bloat_stats hypertable already exists");
   }
 
+  // Convert table_size_history to hypertable
+  const sizeHistoryHypertable = await sql`
+    SELECT * FROM timescaledb_information.hypertables 
+    WHERE hypertable_name = 'table_size_history'
+  `;
+  if (sizeHistoryHypertable.length === 0) {
+    const tableExists = await sql`
+      SELECT 1 FROM information_schema.tables 
+      WHERE table_name = 'table_size_history'
+    `;
+    if (tableExists.length > 0) {
+      await sql`SELECT create_hypertable('table_size_history', by_range('captured_at'))`;
+      console.log("  ✅ table_size_history hypertable created");
+    } else {
+      console.log("  ⏭️  table_size_history table not yet created");
+    }
+  } else {
+    console.log("  ⏭️  table_size_history hypertable already exists");
+  }
+
   console.log("✅ TimescaleDB setup complete.");
 
   await sql.end();

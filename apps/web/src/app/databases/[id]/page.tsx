@@ -27,6 +27,7 @@ import StatsCard from "../../components/StatsCard";
 import StatusBadge from "../../components/StatusBadge";
 import AlertBanner from "../../components/AlertBanner";
 import SessionGroups from "../../components/SessionGroups";
+import Link from "next/link";
 
 /* ===================================================================
    Database Detail — Main monitoring view
@@ -148,13 +149,13 @@ export default function DatabaseDetailPage() {
   if (error) {
     return (
       <div>
-        <a
+        <Link
           href="/"
           className="btn-secondary"
           style={{ marginBottom: "var(--space-lg)", display: "inline-flex" }}
         >
           ← Back
-        </a>
+        </Link>
         <div className="alert alert-error">
           <span>⚠️</span>
           <span>{error}</span>
@@ -184,7 +185,7 @@ export default function DatabaseDetailPage() {
       {/* ---------- Header ---------- */}
       <div className="detail-header">
         <div className="detail-header-left">
-          <a
+          <Link
             href="/"
             style={{
               display: "inline-flex",
@@ -203,7 +204,7 @@ export default function DatabaseDetailPage() {
             title="Back to dashboard"
           >
             ←
-          </a>
+          </Link>
           <div>
             <h1>{database.name}</h1>
             <div
@@ -225,7 +226,7 @@ export default function DatabaseDetailPage() {
             Last updated:{" "}
             {snap ? formatTimestamp(snap.timestamp) : "—"}
           </span>
-          <a
+          <Link
             href={`/databases/${id}/queries`}
             title="Query performance"
             style={{
@@ -246,8 +247,8 @@ export default function DatabaseDetailPage() {
             }}
           >
             📊
-          </a>
-          <a
+          </Link>
+          <Link
             href={`/databases/${id}/indexes`}
             title="Index advisor"
             style={{
@@ -268,8 +269,8 @@ export default function DatabaseDetailPage() {
             }}
           >
             🗂️
-          </a>
-          <a
+          </Link>
+          <Link
             href={`/databases/${id}/health`}
             title="Health & VACUUM"
             style={{
@@ -290,8 +291,8 @@ export default function DatabaseDetailPage() {
             }}
           >
             🩺
-          </a>
-          <a
+          </Link>
+          <Link
             href={`/databases/${id}/alerts`}
             title="Alert settings"
             style={{
@@ -333,7 +334,29 @@ export default function DatabaseDetailPage() {
                 {activeAlerts.length}
               </span>
             )}
-          </a>
+          </Link>
+          <Link
+            href={`/databases/${id}/logs`}
+            title="Log Insights"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 36,
+              height: 36,
+              borderRadius: "var(--radius-md)",
+              background: "var(--surface-alt)",
+              border: "1px solid var(--border)",
+              color: "var(--text-secondary)",
+              fontSize: "0.9rem",
+              transition: "all var(--transition-fast)",
+              marginLeft: "var(--space-sm)",
+              flexShrink: 0,
+              textDecoration: "none",
+            }}
+          >
+            📋
+          </Link>
           <button
             onClick={handleDelete}
             disabled={deleting}

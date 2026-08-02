@@ -21,6 +21,7 @@ interface PgStatStatementsRow {
   rows: string;
   shared_blks_hit: string;
   shared_blks_read: string;
+  temp_blks_written: string;
 }
 
 const CHECK_EXTENSION_QUERY = `
@@ -38,7 +39,8 @@ SELECT
   min_exec_time AS min_time_ms,
   rows::text,
   shared_blks_hit::text,
-  shared_blks_read::text
+  shared_blks_read::text,
+  COALESCE(temp_blks_written, 0)::text AS temp_blks_written
 FROM pg_stat_statements
 WHERE queryid IS NOT NULL
   AND query NOT LIKE '%pg_stat_statements%'
@@ -138,6 +140,7 @@ export async function collectQueryStats(
       rowsReturned: parseInt(r.rows, 10) || 0,
       sharedBlksHit: parseInt(r.shared_blks_hit, 10) || 0,
       sharedBlksRead: parseInt(r.shared_blks_read, 10) || 0,
+      tempBlksWritten: parseInt(r.temp_blks_written, 10) || 0,
       pctOfTotalTime: totalDbTime > 0
         ? Math.round((totalTimeMs / totalDbTime) * 10000) / 100
         : 0,

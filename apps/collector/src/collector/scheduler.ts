@@ -11,6 +11,9 @@ import { purgeOldData } from "./retention.js";
 import { collectQueryStats } from "./query-stats-collector.js";
 import { analyzeIndexes } from "./index-advisor.js";
 import { collectVacuumHealth } from "./vacuum-health-collector.js";
+import { analyzeQuerySuggestions } from "./query-suggestions.js";
+import { collectReplicationLag } from "./replication-collector.js";
+import { collectLogInsights } from "./log-insights-collector.js";
 
 const QUEUE_NAME = "pgvitals-collect";
 const QUERY_STATS_QUEUE_NAME = "pgvitals-query-stats";
@@ -174,6 +177,9 @@ export async function startScheduler(log: FastifyBaseLogger): Promise<void> {
         await collectQueryStats(data.monitoredDbId, jobLog);
         await analyzeIndexes(data.monitoredDbId, jobLog);
         await collectVacuumHealth(data.monitoredDbId, jobLog);
+        await analyzeQuerySuggestions(data.monitoredDbId, jobLog);
+        await collectReplicationLag(data.monitoredDbId, jobLog);
+        await collectLogInsights(data.monitoredDbId, jobLog);
       } catch (err) {
         jobLog.error({ err }, "Query stats collection job failed");
         throw err;

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
   getDatabase,
   getAlerts,
@@ -75,6 +76,14 @@ export default function AlertsPage() {
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState(587);
+  const [smtpUser, setSmtpUser] = useState("");
+  const [smtpPass, setSmtpPass] = useState("");
+  const [useTls, setUseTls] = useState(true);
+  const [fromAddress, setFromAddress] = useState("");
+  const [toAddresses, setToAddresses] = useState("");
   const [ruleStates, setRuleStates] = useState<
     Record<
       string,
@@ -97,6 +106,19 @@ export default function AlertsPage() {
       const withSlack = rls.find((r) => r.channels?.slack?.webhookUrl);
       if (withSlack?.channels?.slack?.webhookUrl) {
         setWebhookUrl(withSlack.channels.slack.webhookUrl);
+      }
+
+      // Extract email config from first rule that has one
+      const withEmail = rls.find((r) => r.channels?.email?.smtpHost);
+      if (withEmail?.channels?.email) {
+        setEmailEnabled(true);
+        setSmtpHost(withEmail.channels.email.smtpHost);
+        setSmtpPort(withEmail.channels.email.smtpPort);
+        setSmtpUser(withEmail.channels.email.smtpUser);
+        setSmtpPass(withEmail.channels.email.smtpPass);
+        setUseTls(withEmail.channels.email.useTls);
+        setFromAddress(withEmail.channels.email.fromAddress);
+        setToAddresses(withEmail.channels.email.toAddresses.join(", "));
       }
 
       // Initialize rule states
@@ -141,9 +163,21 @@ export default function AlertsPage() {
     setSaving(alertType);
     try {
       const existing = rules.find((r) => r.alertType === alertType);
-      const channels = webhookUrl
-        ? { slack: { webhookUrl } }
-        : {};
+      const channels: Record<string, unknown> = {};
+      if (webhookUrl) {
+        channels.slack = { webhookUrl };
+      }
+      if (emailEnabled && smtpHost && toAddresses) {
+        channels.email = {
+          smtpHost,
+          smtpPort,
+          smtpUser,
+          smtpPass,
+          useTls,
+          fromAddress,
+          toAddresses: toAddresses.split(",").map((s: string) => s.trim()).filter(Boolean),
+        };
+      }
 
       if (existing) {
         await updateAlertRule(id, existing.id, {
@@ -169,17 +203,31 @@ export default function AlertsPage() {
     }
   };
 
-  const handleTest = async () => {
+  const handleTestSlack = async () => {
     if (!webhookUrl) return;
     setTestStatus(null);
     try {
-      await testAlertNotification(id, webhookUrl);
-      setTestStatus({ type: "success", message: "Test notification sent!" });
+      await testAlertNotification(id, { webhookUrl });
+      setTestStatus({ type: "success", message: "Slack test sent!" });
     } catch {
-      setTestStatus({
-        type: "error",
-        message: "Failed to send test notification",
+      setTestStatus({ type: "error", message: "Failed to send Slack test" });
+    }
+    setTimeout(() => setTestStatus(null), 4000);
+  };
+
+  const handleTestEmail = async () => {
+    if (!smtpHost || !toAddresses) return;
+    setTestStatus(null);
+    try {
+      await testAlertNotification(id, {
+        emailConfig: {
+          smtpHost, smtpPort, smtpUser, smtpPass, useTls, fromAddress,
+          toAddresses: toAddresses.split(",").map((s: string) => s.trim()).filter(Boolean),
+        },
       });
+      setTestStatus({ type: "success", message: "Email test sent!" });
+    } catch {
+      setTestStatus({ type: "error", message: "Failed to send email test" });
     }
     setTimeout(() => setTestStatus(null), 4000);
   };
@@ -210,7 +258,7 @@ export default function AlertsPage() {
       {/* Header */}
       <div className="detail-header">
         <div className="detail-header-left">
-          <a
+          <Link
             href={`/databases/${id}`}
             style={{
               display: "inline-flex",
@@ -229,7 +277,7 @@ export default function AlertsPage() {
             title="Back to database"
           >
             ←
-          </a>
+          </Link>
           <div>
             <h1>Alerts — {database?.name}</h1>
             <p className="text-secondary" style={{ fontSize: "0.9rem" }}>
@@ -268,13 +316,131 @@ export default function AlertsPage() {
           </div>
           <button
             className="btn-secondary"
-            onClick={handleTest}
+            onClick={handleTestSlack}
             disabled={!webhookUrl}
             style={{ height: 44 }}
           >
             🧪 Test
           </button>
         </div>
+        {testStatus && (
+          <div
+            className={`alert ${
+              testStatus.type === "success" ? "alert-success" : "alert-error"
+            }`}
+            style={{ marginTop: "var(--space-md)", marginBottom: 0 }}
+          >
+            <span>{testStatus.type === "success" ? "✅" : "⚠️"}</span>
+            <span>{testStatus.message}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Email SMTP Config */}
+      <div className="section-title" style={{ marginTop: "var(--space-lg)" }}>Email Notifications</div>
+      <div
+        className="glass-card-static"
+        style={{
+          padding: "var(--space-lg)",
+          marginBottom: "var(--space-xl)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", marginBottom: "var(--space-md)" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={emailEnabled}
+              onChange={(e) => setEmailEnabled(e.target.checked)}
+              style={{ width: 18, height: 18, accentColor: "var(--brand)" }}
+            />
+            <span style={{ fontWeight: 500 }}>Enable Email Alerts</span>
+          </label>
+        </div>
+        {emailEnabled && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-md)" }}>
+            <div>
+              <label className="form-label">SMTP Host</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="smtp.gmail.com"
+                value={smtpHost}
+                onChange={(e) => setSmtpHost(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="form-label">SMTP Port</label>
+              <input
+                type="number"
+                className="form-input"
+                placeholder="587"
+                value={smtpPort}
+                onChange={(e) => setSmtpPort(parseInt(e.target.value, 10) || 587)}
+              />
+            </div>
+            <div>
+              <label className="form-label">Username</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="alerts@yourcompany.com"
+                value={smtpUser}
+                onChange={(e) => setSmtpUser(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="form-label">Password</label>
+              <input
+                type="password"
+                className="form-input"
+                placeholder="••••••••"
+                value={smtpPass}
+                onChange={(e) => setSmtpPass(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="form-label">From Address</label>
+              <input
+                type="email"
+                className="form-input"
+                placeholder="alerts@yourcompany.com"
+                value={fromAddress}
+                onChange={(e) => setFromAddress(e.target.value)}
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={useTls}
+                  onChange={(e) => setUseTls(e.target.checked)}
+                  style={{ width: 18, height: 18, accentColor: "var(--brand)" }}
+                />
+                <span style={{ fontSize: "0.9rem" }}>Use TLS</span>
+              </label>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label className="form-label">Recipients (comma-separated)</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="dba@company.com, team@company.com"
+                value={toAddresses}
+                onChange={(e) => setToAddresses(e.target.value)}
+              />
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <button
+                className="btn-secondary"
+                onClick={handleTestEmail}
+                disabled={!smtpHost || !toAddresses}
+                style={{ height: 44 }}
+              >
+                📧 Send Test Email
+              </button>
+            </div>
+          </div>
+        )}
         {testStatus && (
           <div
             className={`alert ${

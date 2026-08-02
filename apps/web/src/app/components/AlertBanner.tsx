@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import type { Alert } from "../lib/api";
 
 /* ===================================================================
@@ -21,7 +22,7 @@ export default function AlertBanner({ alerts, databaseId }: AlertBannerProps) {
   const isCritical = criticalCount > 0;
 
   return (
-    <a
+    <Link
       href={`/databases/${databaseId}/alerts`}
       className={`alert-banner ${isCritical ? "alert-banner-critical" : "alert-banner-warning"}`}
     >
@@ -40,6 +41,6 @@ export default function AlertBanner({ alerts, databaseId }: AlertBannerProps) {
         </span>
       </div>
       <span className="alert-banner-arrow">→</span>
-    </a>
+    </Link>
   );
 }

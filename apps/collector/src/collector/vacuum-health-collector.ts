@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
-import { db, tableBloatStats, dbHealthSnapshots, monitoredDatabases } from "@pgvitals/db";
-import { eq } from "drizzle-orm";
+import { db, tableBloatStats, dbHealthSnapshots, tableSizeHistory, monitoredDatabases } from "@pgvitals/db";
+import { eq, and, gte, desc } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
 import { safeQuery } from "../lib/safe-query.js";
 import { config } from "../config.js";
@@ -72,6 +72,37 @@ ORDER BY n_dead_tup DESC
 LIMIT 100
 `;
 
+const TABLE_CACHE_HIT_QUERY = `
+SELECT
+  schemaname,
+  relname,
+  CASE WHEN (heap_blks_hit + heap_blks_read) > 0
+    THEN round(heap_blks_hit::numeric / (heap_blks_hit + heap_blks_read)::numeric * 100, 2)
+    ELSE NULL
+  END AS cache_hit_ratio,
+  CASE WHEN (COALESCE(idx_blks_hit, 0) + COALESCE(idx_blks_read, 0)) > 0
+    THEN round(COALESCE(idx_blks_hit, 0)::numeric / (COALESCE(idx_blks_hit, 0) + COALESCE(idx_blks_read, 0))::numeric * 100, 2)
+    ELSE NULL
+  END AS idx_cache_hit_ratio
+FROM pg_statio_user_tables
+WHERE schemaname = 'public'
+`;
+
+const TABLE_SIZE_QUERY = `
+SELECT
+  schemaname,
+  relname,
+  pg_relation_size(relid)::text AS table_size,
+  pg_indexes_size(relid)::text AS index_size,
+  pg_total_relation_size(relid)::text AS total_size
+FROM pg_stat_user_tables
+WHERE schemaname = 'public'
+  AND relname NOT LIKE '_hyper_%'
+  AND relname NOT LIKE '_timescaledb_%'
+ORDER BY pg_total_relation_size(relid) DESC
+LIMIT 100
+`;
+
 const CACHE_HIT_RATIO_QUERY = `
 SELECT
   CASE WHEN (blks_hit + blks_read) > 0
@@ -103,6 +134,34 @@ SELECT
   buffers_backend::text
 FROM pg_stat_bgwriter
 `;
+
+const XID_AGE_QUERY = `
+SELECT
+  age(datfrozenxid)::text AS xid_age
+FROM pg_database
+WHERE datname = current_database()
+`;
+
+const FREEZE_MAX_AGE_QUERY = `
+SHOW autovacuum_freeze_max_age
+`;
+
+/** Per-table cache hit ratio row */
+interface TableCacheRow {
+  schemaname: string;
+  relname: string;
+  cache_hit_ratio: string | null;
+  idx_cache_hit_ratio: string | null;
+}
+
+/** Table size row */
+interface TableSizeRow {
+  schemaname: string;
+  relname: string;
+  table_size: string;
+  index_size: string;
+  total_size: string;
+}
 
 /**
  * Collects table-level vacuum/bloat stats and database health metrics.
@@ -139,40 +198,129 @@ export async function collectVacuumHealth(
       { timeoutMs: 15000 }
     );
 
-    if (tableRows.length > 0) {
-      const bloatRows = tableRows.map((r) => {
-        const nLive = parseInt(r.n_live_tup, 10) || 0;
-        const nDead = parseInt(r.n_dead_tup, 10) || 0;
-        const deadRatio = nLive + nDead > 0
-          ? Math.round((nDead / (nLive + nDead)) * 10000) / 100
-          : 0;
+      if (tableRows.length > 0) {
+        // Fetch per-table cache hit ratios
+        let cacheHitMap: Map<string, { cacheHitRatio: number | null; idxCacheHitRatio: number | null }> = new Map();
+        try {
+          const cacheRows = await safeQuery<TableCacheRow[]>(
+            connectionString,
+            TABLE_CACHE_HIT_QUERY,
+            { timeoutMs: 10000 }
+          );
+          for (const cr of cacheRows) {
+            cacheHitMap.set(cr.relname, {
+              cacheHitRatio: cr.cache_hit_ratio ? parseFloat(cr.cache_hit_ratio) : null,
+              idxCacheHitRatio: cr.idx_cache_hit_ratio ? parseFloat(cr.idx_cache_hit_ratio) : null,
+            });
+          }
+        } catch (err) {
+          log.debug({ err, monitoredDbId }, "Failed to collect per-table cache hit ratios");
+        }
 
-        return {
-          monitoredDbId,
-          capturedAt: now,
-          tableName: r.relname,
-          schemaName: r.schemaname,
-          nLiveTup: nLive,
-          nDeadTup: nDead,
-          deadTupRatio: deadRatio,
-          tableSizeBytes: parseInt(r.table_size, 10) || 0,
-          totalSizeBytes: parseInt(r.total_size, 10) || 0,
-          lastVacuum: r.last_vacuum ? new Date(r.last_vacuum) : null,
-          lastAutovacuum: r.last_autovacuum ? new Date(r.last_autovacuum) : null,
-          lastAnalyze: r.last_analyze ? new Date(r.last_analyze) : null,
-          lastAutoanalyze: r.last_autoanalyze ? new Date(r.last_autoanalyze) : null,
-          vacuumCount: parseInt(r.vacuum_count, 10) || 0,
-          autovacuumCount: parseInt(r.autovacuum_count, 10) || 0,
-          seqScan: parseInt(r.seq_scan, 10) || 0,
-          idxScan: parseInt(r.idx_scan, 10) || 0,
-        };
-      });
+        const bloatRows = tableRows.map((r) => {
+          const nLive = parseInt(r.n_live_tup, 10) || 0;
+          const nDead = parseInt(r.n_dead_tup, 10) || 0;
+          const deadRatio = nLive + nDead > 0
+            ? Math.round((nDead / (nLive + nDead)) * 10000) / 100
+            : 0;
+          const cacheData = cacheHitMap.get(r.relname);
+
+          return {
+            monitoredDbId,
+            capturedAt: now,
+            tableName: r.relname,
+            schemaName: r.schemaname,
+            nLiveTup: nLive,
+            nDeadTup: nDead,
+            deadTupRatio: deadRatio,
+            tableSizeBytes: parseInt(r.table_size, 10) || 0,
+            totalSizeBytes: parseInt(r.total_size, 10) || 0,
+            lastVacuum: r.last_vacuum ? new Date(r.last_vacuum) : null,
+            lastAutovacuum: r.last_autovacuum ? new Date(r.last_autovacuum) : null,
+            lastAnalyze: r.last_analyze ? new Date(r.last_analyze) : null,
+            lastAutoanalyze: r.last_autoanalyze ? new Date(r.last_autoanalyze) : null,
+            vacuumCount: parseInt(r.vacuum_count, 10) || 0,
+            autovacuumCount: parseInt(r.autovacuum_count, 10) || 0,
+            seqScan: parseInt(r.seq_scan, 10) || 0,
+            idxScan: parseInt(r.idx_scan, 10) || 0,
+            cacheHitRatio: cacheData?.cacheHitRatio ?? null,
+            idxCacheHitRatio: cacheData?.idxCacheHitRatio ?? null,
+          };
+        });
 
       await db.insert(tableBloatStats).values(bloatRows);
       log.info({ monitoredDbId, tableCount: bloatRows.length }, "Table bloat stats collected");
     }
   } catch (err) {
     log.warn({ err, monitoredDbId }, "Failed to collect table bloat stats");
+  }
+
+  // 1b. Collect table size history for growth forecasting
+  try {
+    const sizeRows = await safeQuery<TableSizeRow[]>(
+      connectionString,
+      TABLE_SIZE_QUERY,
+      { timeoutMs: 15000 }
+    );
+
+    if (sizeRows.length > 0) {
+      const DISK_LIMIT_BYTES = parseInt(process.env.DISK_LIMIT_BYTES ?? "107374182400", 10); // default 100GB
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const sizeHistoryRows = [];
+      for (const r of sizeRows) {
+        const currentTotalSize = parseInt(r.total_size, 10) || 0;
+
+        // Compute 7-day growth rate
+        let growthRateBytesPerDay: number | null = null;
+        let projectedDaysToDiskLimit: number | null = null;
+
+        try {
+          const [oldestEntry] = await db
+            .select()
+            .from(tableSizeHistory)
+            .where(
+              and(
+                eq(tableSizeHistory.monitoredDbId, monitoredDbId),
+                eq(tableSizeHistory.tableName, r.relname),
+                gte(tableSizeHistory.capturedAt, sevenDaysAgo)
+              )
+            )
+            .orderBy(tableSizeHistory.capturedAt)
+            .limit(1);
+
+          if (oldestEntry) {
+            const daysDiff = (now.getTime() - oldestEntry.capturedAt.getTime()) / (1000 * 60 * 60 * 24);
+            if (daysDiff > 0.5) {
+              growthRateBytesPerDay = (currentTotalSize - oldestEntry.totalSizeBytes) / daysDiff;
+              if (growthRateBytesPerDay > 0) {
+                const remainingBytes = DISK_LIMIT_BYTES - currentTotalSize;
+                projectedDaysToDiskLimit = Math.max(0, Math.floor(remainingBytes / growthRateBytesPerDay));
+              }
+            }
+          }
+        } catch {
+          // Skip growth computation if comparison fails
+        }
+
+        sizeHistoryRows.push({
+          monitoredDbId,
+          capturedAt: now,
+          tableName: r.relname,
+          schemaName: r.schemaname,
+          tableSizeBytes: parseInt(r.table_size, 10) || 0,
+          indexSizeBytes: parseInt(r.index_size, 10) || 0,
+          totalSizeBytes: currentTotalSize,
+          growthRateBytesPerDay,
+          projectedDaysToDiskLimit,
+        });
+      }
+
+      await db.insert(tableSizeHistory).values(sizeHistoryRows);
+      log.info({ monitoredDbId, tableCount: sizeHistoryRows.length }, "Table size history collected");
+    }
+  } catch (err) {
+    log.warn({ err, monitoredDbId }, "Failed to collect table size history");
   }
 
   // 2. Collect database-level health metrics
@@ -217,7 +365,52 @@ export async function collectVacuumHealth(
       conflictsCount: dbStats ? parseInt(dbStats.conflicts, 10) || 0 : null,
       deadlocksCount: dbStats ? parseInt(dbStats.deadlocks, 10) || 0 : null,
       tempFileBytes: dbStats ? parseInt(dbStats.temp_bytes, 10) || 0 : null,
+      xidAge: null,
+      autovacuumFreezeMaxAge: null,
+      xidPercentUsed: null,
     });
+
+    // 2b. Collect XID wraparound data
+    try {
+      const [xidRow] = await safeQuery<Array<{ xid_age: string }>>(
+        connectionString,
+        XID_AGE_QUERY,
+        { timeoutMs: 5000 }
+      );
+      const [freezeRow] = await safeQuery<Array<{ autovacuum_freeze_max_age: string }>>(
+        connectionString,
+        FREEZE_MAX_AGE_QUERY,
+        { timeoutMs: 5000 }
+      );
+
+      if (xidRow && freezeRow) {
+        const xidAge = parseInt(xidRow.xid_age, 10) || 0;
+        const freezeMaxAge = parseInt(freezeRow.autovacuum_freeze_max_age, 10) || 200000000;
+        const xidPercentUsed = freezeMaxAge > 0
+          ? Math.round((xidAge / freezeMaxAge) * 10000) / 100
+          : 0;
+
+        // Update the row we just inserted with XID data
+        // Use raw SQL update on the latest row
+        await db
+          .update(dbHealthSnapshots)
+          .set({
+            xidAge,
+            autovacuumFreezeMaxAge: freezeMaxAge,
+            xidPercentUsed,
+          })
+          .where(
+            and(
+              eq(dbHealthSnapshots.monitoredDbId, monitoredDbId),
+              eq(dbHealthSnapshots.capturedAt, now)
+            )
+          );
+
+        log.info({ monitoredDbId, xidAge, freezeMaxAge, xidPercentUsed }, "XID wraparound data collected");
+      }
+    } catch (err) {
+      log.debug({ err, monitoredDbId }, "Failed to collect XID wraparound data (may require superuser)");
+    }
 
     log.info({ monitoredDbId, cacheHitRatio }, "DB health snapshot collected");
   } catch (err) {

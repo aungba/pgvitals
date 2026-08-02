@@ -5,6 +5,7 @@ import type { CollectionResult } from "../collector/connection-collector.js";
 import type { GeneratedHint } from "../collector/rules-engine.js";
 import { generateFingerprint, hintToAlertType } from "./fingerprint.js";
 import { sendSlackAlert, type AlertPayload } from "./notifier.js";
+import { sendEmailAlert, type EmailConfig } from "./email-notifier.js";
 
 /* ===================================================================
    Alerting Engine — evaluates hints, deduplicates, fires alerts
@@ -12,6 +13,7 @@ import { sendSlackAlert, type AlertPayload } from "./notifier.js";
 
 interface ChannelsConfig {
   slack?: { webhookUrl: string };
+  email?: EmailConfig;
 }
 
 /**
@@ -177,5 +179,8 @@ async function dispatchNotification(
     await sendSlackAlert(channels.slack.webhookUrl, payload, log);
   }
 
-  // Future channels (email, PagerDuty, etc.) would go here
+  // Email
+  if (channels?.email?.smtpHost && channels.email.toAddresses?.length > 0) {
+    await sendEmailAlert(channels.email, payload, log);
+  }
 }

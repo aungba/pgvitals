@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { db, snapshots, sessionsSnapshot, rootCauseHints, alerts, queryStats, explainCaptures, indexRecommendations, tableBloatStats, dbHealthSnapshots } from "@pgvitals/db";
+import { db, snapshots, sessionsSnapshot, rootCauseHints, alerts, queryStats, explainCaptures, indexRecommendations, tableBloatStats, dbHealthSnapshots, querySuggestions, tableSizeHistory, replicationSnapshots, logInsights, dbErrorStats } from "@pgvitals/db";
 import { lt, and, isNotNull, eq } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
@@ -24,7 +24,7 @@ const DEFAULT_RETENTION_DAYS = 30;
 export async function purgeOldData(
   log: FastifyBaseLogger,
   retentionDays: number = DEFAULT_RETENTION_DAYS
-): Promise<{ deletedSnapshots: number; deletedSessions: number; deletedHints: number; deletedAlerts: number; deletedQueryStats: number; deletedExplains: number; deletedIndexRecs: number; deletedBloatStats: number; deletedHealthSnapshots: number }> {
+): Promise<{ deletedSnapshots: number; deletedSessions: number; deletedHints: number; deletedAlerts: number; deletedQueryStats: number; deletedExplains: number; deletedIndexRecs: number; deletedBloatStats: number; deletedHealthSnapshots: number; deletedSuggestions: number; deletedSizeHistory: number; deletedReplicationSnapshots: number; deletedLogInsights: number; deletedErrorStats: number }> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - retentionDays);
 
@@ -106,11 +106,51 @@ export async function purgeOldData(
     .returning({ id: dbHealthSnapshots.id });
   const deletedHealthSnapshots = healthResult.length;
 
+  // 10. Delete old dismissed query_suggestions
+  const suggestionsResult = await db
+    .delete(querySuggestions)
+    .where(
+      and(
+        lt(querySuggestions.detectedAt, cutoff),
+        eq(querySuggestions.dismissed, true)
+      )
+    )
+    .returning({ id: querySuggestions.id });
+  const deletedSuggestions = suggestionsResult.length;
+
+  // 11. Delete old table_size_history
+  const sizeHistoryResult = await db
+    .delete(tableSizeHistory)
+    .where(lt(tableSizeHistory.capturedAt, cutoff))
+    .returning({ id: tableSizeHistory.id });
+  const deletedSizeHistory = sizeHistoryResult.length;
+
+  // 12. Delete old replication_snapshots
+  const replicationResult = await db
+    .delete(replicationSnapshots)
+    .where(lt(replicationSnapshots.capturedAt, cutoff))
+    .returning({ id: replicationSnapshots.id });
+  const deletedReplicationSnapshots = replicationResult.length;
+
+  // 13. Delete old log_insights
+  const logInsightsResult = await db
+    .delete(logInsights)
+    .where(lt(logInsights.capturedAt, cutoff))
+    .returning({ id: logInsights.id });
+  const deletedLogInsights = logInsightsResult.length;
+
+  // 14. Delete old db_error_stats
+  const errorStatsResult = await db
+    .delete(dbErrorStats)
+    .where(lt(dbErrorStats.capturedAt, cutoff))
+    .returning({ id: dbErrorStats.id });
+  const deletedErrorStats = errorStatsResult.length;
+
   log.info(
-    { deletedSnapshots, deletedSessions, deletedHints, deletedAlerts, deletedQueryStats, deletedExplains, deletedIndexRecs, deletedBloatStats, deletedHealthSnapshots },
+    { deletedSnapshots, deletedSessions, deletedHints, deletedAlerts, deletedQueryStats, deletedExplains, deletedIndexRecs, deletedBloatStats, deletedHealthSnapshots, deletedSuggestions, deletedSizeHistory, deletedReplicationSnapshots, deletedLogInsights, deletedErrorStats },
     "Data retention purge complete"
   );
 
-  return { deletedSnapshots, deletedSessions, deletedHints, deletedAlerts, deletedQueryStats, deletedExplains, deletedIndexRecs, deletedBloatStats, deletedHealthSnapshots };
+  return { deletedSnapshots, deletedSessions, deletedHints, deletedAlerts, deletedQueryStats, deletedExplains, deletedIndexRecs, deletedBloatStats, deletedHealthSnapshots, deletedSuggestions, deletedSizeHistory, deletedReplicationSnapshots, deletedLogInsights, deletedErrorStats };
 }
 

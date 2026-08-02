@@ -24,6 +24,7 @@ export {
 export {
   queryStats,
   explainCaptures,
+  querySuggestions,
 } from "./query-performance.js";
 
 export {
@@ -34,4 +35,15 @@ export {
 export {
   tableBloatStats,
   dbHealthSnapshots,
+  tableSizeHistory,
 } from "./vacuum-health.js";
+
+export {
+  replicationSnapshots,
+} from "./replication.js";
+
+export {
+  logInsights,
+  dbErrorStats,
+  logSeverityEnum,
+} from "./log-insights.js";

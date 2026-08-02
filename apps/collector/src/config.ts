@@ -7,6 +7,12 @@ export interface Config {
   pollingIntervalMs: number;
   queryStatsIntervalMs: number;
   encryptionKey: string;
+  clerkSecretKey: string;
+  clerkPublishableKey: string;
+  stripeSecretKey: string;
+  stripeWebhookSecret: string;
+  stripeProPriceId: string;
+  stripeTeamPriceId: string;
 }
 
 function requireEnv(name: string): string {
@@ -24,5 +30,11 @@ export const config: Config = {
   pollingIntervalMs: parseInt(process.env.POLLING_INTERVAL_MS ?? "10000", 10),
   queryStatsIntervalMs: parseInt(process.env.QUERY_STATS_INTERVAL_MS ?? "300000", 10),
   encryptionKey: requireEnv("ENCRYPTION_KEY"),
+  clerkSecretKey: process.env.CLERK_SECRET_KEY ?? "",
+  clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "",
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+  stripeProPriceId: process.env.STRIPE_PRO_PRICE_ID ?? "",
+  stripeTeamPriceId: process.env.STRIPE_TEAM_PRICE_ID ?? "",
 };
 
