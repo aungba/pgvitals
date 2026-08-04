@@ -357,6 +357,94 @@ export default function DatabaseDetailPage() {
           >
             📋
           </Link>
+          <Link
+            href={`/databases/${id}/schema`}
+            title="Schema Changes"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 36,
+              height: 36,
+              borderRadius: "var(--radius-md)",
+              background: "var(--surface-alt)",
+              border: "1px solid var(--border)",
+              color: "var(--text-secondary)",
+              fontSize: "0.9rem",
+              transition: "all var(--transition-fast)",
+              marginLeft: "var(--space-sm)",
+              flexShrink: 0,
+              textDecoration: "none",
+            }}
+          >
+            📐
+          </Link>
+          <Link
+            href={`/databases/${id}/plans`}
+            title="Plan Regression"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 36,
+              height: 36,
+              borderRadius: "var(--radius-md)",
+              background: "var(--surface-alt)",
+              border: "1px solid var(--border)",
+              color: "var(--text-secondary)",
+              fontSize: "0.9rem",
+              transition: "all var(--transition-fast)",
+              marginLeft: "var(--space-sm)",
+              flexShrink: 0,
+              textDecoration: "none",
+            }}
+          >
+            🔀
+          </Link>
+          <Link
+            href={`/databases/${id}/costs`}
+            title="Cost Estimator"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 36,
+              height: 36,
+              borderRadius: "var(--radius-md)",
+              background: "var(--surface-alt)",
+              border: "1px solid var(--border)",
+              color: "var(--text-secondary)",
+              fontSize: "0.9rem",
+              transition: "all var(--transition-fast)",
+              marginLeft: "var(--space-sm)",
+              flexShrink: 0,
+              textDecoration: "none",
+            }}
+          >
+            💰
+          </Link>
+          <Link
+            href={`/databases/${id}/pooler`}
+            title="PgBouncer Pools"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 36,
+              height: 36,
+              borderRadius: "var(--radius-md)",
+              background: "var(--surface-alt)",
+              border: "1px solid var(--border)",
+              color: "var(--text-secondary)",
+              fontSize: "0.9rem",
+              transition: "all var(--transition-fast)",
+              marginLeft: "var(--space-sm)",
+              flexShrink: 0,
+              textDecoration: "none",
+            }}
+          >
+            🔌
+          </Link>
           <button
             onClick={handleDelete}
             disabled={deleting}

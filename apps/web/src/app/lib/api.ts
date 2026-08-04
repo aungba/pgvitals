@@ -378,7 +378,7 @@ export async function getQueryStatsStatus(
 
 export async function getQueries(
   dbId: string,
-  sort: "total_time" | "calls" | "mean_time" | "rows" = "total_time",
+  sort: "total_time" | "calls" | "mean_time" | "rows" | "temp_blks" = "total_time",
   limit = 50,
   token?: string,
 ): Promise<{ queries: QueryStat[]; latestCapturedAt: string | null }> {
@@ -829,8 +829,8 @@ export interface PlanSnapshot {
   planShapeHash: string;
   estimatedCost: number | null;
   topNodeType: string | null;
-  planFlags: Record<string, unknown> | null;
-  planJson: unknown;
+  planFlags: Record<string, boolean> | null;
+  planJson: object | null;
   regression: string | null;
 }
 
