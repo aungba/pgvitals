@@ -191,23 +191,7 @@ export async function collectPlanSnapshots(
 
       capturedCount++;
 
-      // Check for plan regression
-      const [prevPlan] = await db
-        .select({
-          planShapeHash: queryPlanSnapshots.planShapeHash,
-          topNodeType: queryPlanSnapshots.topNodeType,
-        })
-        .from(queryPlanSnapshots)
-        .where(
-          and(
-            eq(queryPlanSnapshots.monitoredDbId, monitoredDbId),
-            eq(queryPlanSnapshots.queryid, query.queryid)
-          )
-        )
-        .orderBy(desc(queryPlanSnapshots.capturedAt))
-        .limit(1); // This gets the one we just inserted, so we need offset
-
-      // Get the previous-previous one (skip the one we just inserted)
+      // Check for plan regression — get last 2 snapshots for this query
       const prevPlans = await db
         .select({
           planShapeHash: queryPlanSnapshots.planShapeHash,

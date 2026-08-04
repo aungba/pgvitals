@@ -20,6 +20,7 @@ export function hintToAlertType(
     replication_not_streaming: "replication_lag",
     monitoring_failure: "monitoring_failure",
     pool_exhaustion: "pool_exhaustion",
+    plan_regression: "monitoring_failure", // Plan regressions alert as monitoring_failure type
   };
   return map[ruleType] ?? null;
 }
@@ -59,6 +60,9 @@ export function generateFingerprint(
 
     case "pool_exhaustion":
       return `pool_exhaust:${monitoredDbId}:${meta.pool_name ?? "unknown"}`;
+
+    case "plan_regression":
+      return `plan_regress:${monitoredDbId}:${meta.queryid ?? "unknown"}`;
 
     default:
       return `unknown:${monitoredDbId}:${hint.ruleType}`;

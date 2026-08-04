@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { db, snapshots, sessionsSnapshot, rootCauseHints, alerts, queryStats, explainCaptures, indexRecommendations, tableBloatStats, dbHealthSnapshots, querySuggestions, tableSizeHistory, replicationSnapshots, logInsights, dbErrorStats, monitoredDatabases, organizations } from "@pgvitals/db";
+import { db, snapshots, sessionsSnapshot, rootCauseHints, alerts, queryStats, explainCaptures, indexRecommendations, tableBloatStats, dbHealthSnapshots, querySuggestions, tableSizeHistory, replicationSnapshots, logInsights, dbErrorStats, monitoredDatabases, organizations, queryPlanSnapshots, poolerSnapshots, schemaEvents, schemaSnapshots } from "@pgvitals/db";
 import { lt, and, isNotNull, eq, inArray } from "drizzle-orm";
 
 /* ===================================================================
@@ -73,7 +73,7 @@ function groupCutoffs(cutoffByDb: Map<string, Date>): Map<number, { cutoff: Date
 export async function purgeOldData(
   log: FastifyBaseLogger,
   retentionDaysOverride?: number
-): Promise<{ deletedSnapshots: number; deletedSessions: number; deletedHints: number; deletedAlerts: number; deletedQueryStats: number; deletedExplains: number; deletedIndexRecs: number; deletedBloatStats: number; deletedHealthSnapshots: number; deletedSuggestions: number; deletedSizeHistory: number; deletedReplicationSnapshots: number; deletedLogInsights: number; deletedErrorStats: number }> {
+): Promise<{ deletedSnapshots: number; deletedSessions: number; deletedHints: number; deletedAlerts: number; deletedQueryStats: number; deletedExplains: number; deletedIndexRecs: number; deletedBloatStats: number; deletedHealthSnapshots: number; deletedSuggestions: number; deletedSizeHistory: number; deletedReplicationSnapshots: number; deletedLogInsights: number; deletedErrorStats: number; deletedPlanSnapshots: number; deletedPoolerSnapshots: number; deletedSchemaEvents: number; deletedSchemaSnaps: number }> {
   // Build per-database retention map from plan tiers
   const retentionMap = retentionDaysOverride != null
     ? new Map<string, number>() // unused when override is set
@@ -245,10 +245,34 @@ export async function purgeOldData(
     dbErrorStats.id as never, dbErrorStats.monitoredDbId as never
   );
 
+  // 15. Delete old query_plan_snapshots
+  const deletedPlanSnapshots = await purgeMonitoredTable(
+    queryPlanSnapshots as never, queryPlanSnapshots.capturedAt as never,
+    queryPlanSnapshots.id as never, queryPlanSnapshots.monitoredDbId as never
+  );
+
+  // 16. Delete old pooler_snapshots
+  const deletedPoolerSnapshots = await purgeMonitoredTable(
+    poolerSnapshots as never, poolerSnapshots.capturedAt as never,
+    poolerSnapshots.id as never, poolerSnapshots.monitoredDbId as never
+  );
+
+  // 17. Delete old schema_events
+  const deletedSchemaEvents = await purgeMonitoredTable(
+    schemaEvents as never, schemaEvents.detectedAt as never,
+    schemaEvents.id as never, schemaEvents.monitoredDbId as never
+  );
+
+  // 18. Delete old schema_snapshots
+  const deletedSchemaSnaps = await purgeMonitoredTable(
+    schemaSnapshots as never, schemaSnapshots.capturedAt as never,
+    schemaSnapshots.id as never, schemaSnapshots.monitoredDbId as never
+  );
+
   log.info(
-    { deletedSnapshots, deletedSessions, deletedHints, deletedAlerts, deletedQueryStats, deletedExplains, deletedIndexRecs, deletedBloatStats, deletedHealthSnapshots, deletedSuggestions, deletedSizeHistory, deletedReplicationSnapshots, deletedLogInsights, deletedErrorStats },
+    { deletedSnapshots, deletedSessions, deletedHints, deletedAlerts, deletedQueryStats, deletedExplains, deletedIndexRecs, deletedBloatStats, deletedHealthSnapshots, deletedSuggestions, deletedSizeHistory, deletedReplicationSnapshots, deletedLogInsights, deletedErrorStats, deletedPlanSnapshots, deletedPoolerSnapshots, deletedSchemaEvents, deletedSchemaSnaps },
     "Data retention purge complete"
   );
 
-  return { deletedSnapshots, deletedSessions, deletedHints, deletedAlerts, deletedQueryStats, deletedExplains, deletedIndexRecs, deletedBloatStats, deletedHealthSnapshots, deletedSuggestions, deletedSizeHistory, deletedReplicationSnapshots, deletedLogInsights, deletedErrorStats };
+  return { deletedSnapshots, deletedSessions, deletedHints, deletedAlerts, deletedQueryStats, deletedExplains, deletedIndexRecs, deletedBloatStats, deletedHealthSnapshots, deletedSuggestions, deletedSizeHistory, deletedReplicationSnapshots, deletedLogInsights, deletedErrorStats, deletedPlanSnapshots, deletedPoolerSnapshots, deletedSchemaEvents, deletedSchemaSnaps };
 }
