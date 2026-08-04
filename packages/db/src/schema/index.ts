@@ -47,3 +47,16 @@ export {
   dbErrorStats,
   logSeverityEnum,
 } from "./log-insights.js";
+
+export {
+  schemaEvents,
+  schemaSnapshots,
+} from "./schema-events.js";
+
+export {
+  queryPlanSnapshots,
+} from "./query-plans.js";
+
+export {
+  poolerSnapshots,
+} from "./pooler.js";

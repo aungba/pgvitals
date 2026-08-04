@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { config } from "../config.js";
 import { collectSnapshot } from "./connection-collector.js";
 import { evaluateRules } from "./rules-engine.js";
-import { evaluateAlerts } from "../alerting/engine.js";
+import { evaluateAlerts, evaluateHintsForDb } from "../alerting/engine.js";
 import { purgeOldData } from "./retention.js";
 import { collectQueryStats } from "./query-stats-collector.js";
 import { analyzeIndexes } from "./index-advisor.js";
@@ -14,10 +14,17 @@ import { collectVacuumHealth } from "./vacuum-health-collector.js";
 import { analyzeQuerySuggestions } from "./query-suggestions.js";
 import { collectReplicationLag } from "./replication-collector.js";
 import { collectLogInsights } from "./log-insights-collector.js";
+import { collectPlanSnapshots } from "./plan-regression-collector.js";
+import { collectPoolerStats } from "./pooler-collector.js";
+import { collectSchemaDiff } from "./schema-diff-collector.js";
+import type { GeneratedHint } from "./rules-engine.js";
 
 const QUEUE_NAME = "pgvitals-collect";
 const QUERY_STATS_QUEUE_NAME = "pgvitals-query-stats";
 const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Consecutive failure threshold for meta-alerting */
+const META_ALERT_FAILURE_THRESHOLD = 3;
 
 let queue: Queue | null = null;
 let queryStatsQueue: Queue | null = null;
@@ -25,6 +32,9 @@ let worker: Worker | null = null;
 let queryStatsWorker: Worker | null = null;
 let redisConnection: IORedis | null = null;
 let retentionTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Track consecutive failures per monitored database for meta-alerting */
+const failureCountMap = new Map<string, number>();
 
 interface CollectJobData {
   monitoredDbId: string;
@@ -41,6 +51,30 @@ function getRedisConnection(): IORedis {
     });
   }
   return redisConnection;
+}
+
+/**
+ * Generates a monitoring_failure hint when a collector job has failed
+ * consecutively past the threshold.
+ */
+function buildMonitoringFailureHint(
+  monitoredDbId: string,
+  dbName: string,
+  failureCount: number,
+  lastError: string
+): GeneratedHint {
+  return {
+    ruleType: "monitoring_failure",
+    severity: "critical",
+    title: `Monitoring failure for "${dbName}"`,
+    description: `Data collection for database "${dbName}" has failed ${failureCount} times consecutively. Last error: ${lastError}. Check the connection string and database accessibility.`,
+    metadata: {
+      monitored_db_id: monitoredDbId,
+      db_name: dbName,
+      consecutive_failures: failureCount,
+      last_error: lastError,
+    },
+  };
 }
 
 /**
@@ -140,12 +174,31 @@ export async function startScheduler(log: FastifyBaseLogger): Promise<void> {
         jobLog.info("Running alerting engine");
         await evaluateAlerts(result, hints, jobLog);
 
+        // Reset failure counter on success
+        failureCountMap.delete(data.monitoredDbId);
+
         jobLog.info(
           { hintsGenerated: hints.length },
           "Collection job completed"
         );
       } catch (err) {
-        jobLog.error({ err }, "Collection job failed");
+        // Meta-alerting: track consecutive failures
+        const count = (failureCountMap.get(data.monitoredDbId) ?? 0) + 1;
+        failureCountMap.set(data.monitoredDbId, count);
+
+        if (count >= META_ALERT_FAILURE_THRESHOLD) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          const metaHint = buildMonitoringFailureHint(
+            data.monitoredDbId, data.dbName, count, errorMsg
+          );
+          try {
+            await evaluateHintsForDb(data.monitoredDbId, [metaHint], jobLog);
+          } catch (alertErr) {
+            jobLog.error({ alertErr }, "Failed to fire monitoring failure alert");
+          }
+        }
+
+        jobLog.error({ err, consecutiveFailures: count }, "Collection job failed");
         throw err;
       }
     },
@@ -178,8 +231,26 @@ export async function startScheduler(log: FastifyBaseLogger): Promise<void> {
         await analyzeIndexes(data.monitoredDbId, jobLog);
         await collectVacuumHealth(data.monitoredDbId, jobLog);
         await analyzeQuerySuggestions(data.monitoredDbId, jobLog);
-        await collectReplicationLag(data.monitoredDbId, jobLog);
+
+        // Collect replication lag and wire hints to alerting
+        const replHints = await collectReplicationLag(data.monitoredDbId, jobLog);
+        if (replHints.length > 0) {
+          await evaluateHintsForDb(data.monitoredDbId, replHints, jobLog);
+        }
+
         await collectLogInsights(data.monitoredDbId, jobLog);
+
+        // Collect plan snapshots and detect regressions
+        const planHints = await collectPlanSnapshots(data.monitoredDbId, jobLog);
+        if (planHints.length > 0) {
+          await evaluateHintsForDb(data.monitoredDbId, planHints, jobLog);
+        }
+
+        // Collect PgBouncer pool stats (skips silently if not configured)
+        const poolerHints = await collectPoolerStats(data.monitoredDbId, jobLog);
+        if (poolerHints.length > 0) {
+          await evaluateHintsForDb(data.monitoredDbId, poolerHints, jobLog);
+        }
       } catch (err) {
         jobLog.error({ err }, "Query stats collection job failed");
         throw err;
@@ -208,12 +279,33 @@ export async function startScheduler(log: FastifyBaseLogger): Promise<void> {
   purgeOldData(log).catch((err) =>
     log.error({ err }, "Initial retention purge failed")
   );
+
+  // Run schema diff on startup and daily
+  const runSchemaDiffForAll = async () => {
+    const allDbs = await db
+      .select({ id: monitoredDatabases.id })
+      .from(monitoredDatabases)
+      .where(eq(monitoredDatabases.isActive, "true"));
+    for (const dbRow of allDbs) {
+      await collectSchemaDiff(dbRow.id, log).catch((err) =>
+        log.error({ err, monitoredDbId: dbRow.id }, "Schema diff failed")
+      );
+    }
+  };
+  runSchemaDiffForAll().catch((err) =>
+    log.error({ err }, "Initial schema diff failed")
+  );
+
   retentionTimer = setInterval(() => {
     purgeOldData(log).catch((err) =>
       log.error({ err }, "Scheduled retention purge failed")
     );
+    runSchemaDiffForAll().catch((err) =>
+      log.error({ err }, "Scheduled schema diff failed")
+    );
   }, RETENTION_INTERVAL_MS);
-  log.info("Data retention job scheduled (every 24h, 30-day window)");
+  log.info("Data retention job scheduled (every 24h, tier-based retention)");
+  log.info("Schema diff collection scheduled (every 24h)");
 }
 
 /**

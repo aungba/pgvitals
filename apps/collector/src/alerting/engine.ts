@@ -6,6 +6,7 @@ import type { GeneratedHint } from "../collector/rules-engine.js";
 import { generateFingerprint, hintToAlertType } from "./fingerprint.js";
 import { sendSlackAlert, type AlertPayload } from "./notifier.js";
 import { sendEmailAlert, type EmailConfig } from "./email-notifier.js";
+import { config } from "../config.js";
 
 /* ===================================================================
    Alerting Engine — evaluates hints, deduplicates, fires alerts
@@ -106,6 +107,7 @@ export async function evaluateAlerts(
           rootCauseHint: hint.description,
           details: hint.metadata,
           firedAt: now.toISOString(),
+        dashboardUrl: `${config.dashboardBaseUrl}/databases/${monitoredDbId}/alerts`,
         }, log);
       }
       // Otherwise within cooldown — skip
@@ -135,6 +137,7 @@ export async function evaluateAlerts(
         rootCauseHint: hint.description,
         details: hint.metadata,
         firedAt: now.toISOString(),
+        dashboardUrl: `${config.dashboardBaseUrl}/databases/${monitoredDbId}/alerts`,
       }, log);
     }
   }
@@ -166,9 +169,6 @@ export async function evaluateAlerts(
   }
 }
 
-/**
- * Dispatches an alert to all configured notification channels.
- */
 async function dispatchNotification(
   channels: ChannelsConfig,
   payload: AlertPayload,
@@ -182,5 +182,117 @@ async function dispatchNotification(
   // Email
   if (channels?.email?.smtpHost && channels.email.toAddresses?.length > 0) {
     await sendEmailAlert(channels.email, payload, log);
+  }
+}
+
+/**
+ * Lightweight alert evaluator for non-connection-based hints
+ * (replication lag, monitoring failures, etc.).
+ * Follows the same dedup/cooldown/notify logic as evaluateAlerts.
+ */
+export async function evaluateHintsForDb(
+  monitoredDbId: string,
+  hints: GeneratedHint[],
+  log: FastifyBaseLogger
+): Promise<void> {
+  if (hints.length === 0) return;
+
+  // 1. Fetch enabled alert rules for this database
+  const rules = await db
+    .select()
+    .from(alertRules)
+    .where(
+      and(
+        eq(alertRules.monitoredDbId, monitoredDbId),
+        eq(alertRules.enabled, true)
+      )
+    );
+
+  if (rules.length === 0) return;
+
+  const ruleMap = new Map(rules.map((r) => [r.alertType, r]));
+
+  // 2. Fetch the database record for notification context
+  const [monitoredDb] = await db
+    .select({ name: monitoredDatabases.name, environment: monitoredDatabases.environment })
+    .from(monitoredDatabases)
+    .where(eq(monitoredDatabases.id, monitoredDbId))
+    .limit(1);
+
+  if (!monitoredDb) return;
+
+  // 3. Process each hint
+  for (const hint of hints) {
+    const alertType = hintToAlertType(hint.ruleType);
+    if (!alertType) continue;
+
+    const rule = ruleMap.get(alertType);
+    if (!rule) continue;
+
+    const fingerprint = generateFingerprint(monitoredDbId, hint);
+
+    // Check for existing active alert with same fingerprint
+    const [existingAlert] = await db
+      .select()
+      .from(alerts)
+      .where(
+        and(
+          eq(alerts.fingerprint, fingerprint),
+          eq(alerts.monitoredDbId, monitoredDbId),
+          isNull(alerts.resolvedAt)
+        )
+      )
+      .orderBy(desc(alerts.firedAt))
+      .limit(1);
+
+    const now = new Date();
+
+    if (existingAlert) {
+      const cooldownMs = rule.cooldownMinutes * 60_000;
+      const lastNotified = existingAlert.lastNotifiedAt ?? existingAlert.firedAt;
+      const timeSinceNotified = now.getTime() - new Date(lastNotified).getTime();
+
+      if (timeSinceNotified >= cooldownMs) {
+        await db
+          .update(alerts)
+          .set({ lastNotifiedAt: now })
+          .where(eq(alerts.id, existingAlert.id));
+
+        await dispatchNotification(rule.channels as ChannelsConfig, {
+          alertType,
+          severity: hint.severity as "warning" | "critical",
+          databaseName: monitoredDb.name,
+          environment: monitoredDb.environment,
+          rootCauseHint: hint.description,
+          details: hint.metadata,
+          firedAt: now.toISOString(),
+        dashboardUrl: `${config.dashboardBaseUrl}/databases/${monitoredDbId}/alerts`,
+        }, log);
+      }
+    } else {
+      await db.insert(alerts).values({
+        monitoredDbId,
+        alertType,
+        severity: hint.severity as "warning" | "critical",
+        fingerprint,
+        details: hint.metadata,
+        rootCauseHint: hint.description,
+        firedAt: now,
+        lastNotifiedAt: now,
+      });
+
+      log.info({ monitoredDbId, alertType, fingerprint }, "New alert fired");
+
+      await dispatchNotification(rule.channels as ChannelsConfig, {
+        alertType,
+        severity: hint.severity as "warning" | "critical",
+        databaseName: monitoredDb.name,
+        environment: monitoredDb.environment,
+        rootCauseHint: hint.description,
+        details: hint.metadata,
+        firedAt: now.toISOString(),
+        dashboardUrl: `${config.dashboardBaseUrl}/databases/${monitoredDbId}/alerts`,
+      }, log);
+    }
   }
 }

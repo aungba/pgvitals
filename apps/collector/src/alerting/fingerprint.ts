@@ -9,13 +9,17 @@ import type { GeneratedHint } from "../collector/rules-engine.js";
  */
 export function hintToAlertType(
   ruleType: string
-): "idle_in_transaction" | "connection_hog" | "blocking_chain" | "connection_exhaustion" | "connection_spike" | null {
-  const map: Record<string, "idle_in_transaction" | "connection_hog" | "blocking_chain" | "connection_exhaustion" | "connection_spike"> = {
+): "idle_in_transaction" | "connection_hog" | "blocking_chain" | "connection_exhaustion" | "connection_spike" | "replication_lag" | "monitoring_failure" | "pool_exhaustion" | null {
+  const map: Record<string, "idle_in_transaction" | "connection_hog" | "blocking_chain" | "connection_exhaustion" | "connection_spike" | "replication_lag" | "monitoring_failure" | "pool_exhaustion"> = {
     idle_in_transaction_long: "idle_in_transaction",
     connection_hog: "connection_hog",
     blocking_chain_long: "blocking_chain",
     connection_exhaustion: "connection_exhaustion",
     connection_spike: "connection_spike",
+    replication_lag: "replication_lag",
+    replication_not_streaming: "replication_lag",
+    monitoring_failure: "monitoring_failure",
+    pool_exhaustion: "pool_exhaustion",
   };
   return map[ruleType] ?? null;
 }
@@ -45,6 +49,16 @@ export function generateFingerprint(
 
     case "connection_spike":
       return `conn_spike:${monitoredDbId}`;
+
+    case "replication_lag":
+    case "replication_not_streaming":
+      return `repl_lag:${monitoredDbId}:${meta.replica_name ?? "unknown"}`;
+
+    case "monitoring_failure":
+      return `monitor_fail:${monitoredDbId}`;
+
+    case "pool_exhaustion":
+      return `pool_exhaust:${monitoredDbId}:${meta.pool_name ?? "unknown"}`;
 
     default:
       return `unknown:${monitoredDbId}:${hint.ruleType}`;

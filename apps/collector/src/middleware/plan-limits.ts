@@ -12,6 +12,8 @@ export interface PlanLimits {
   queryPerformanceEnabled: boolean;
   indexAdvisorEnabled: boolean;
   vacuumAdvisorEnabled: boolean;
+  replicationEnabled: boolean;
+  logInsightsEnabled: boolean;
   retentionDays: number;
 }
 
@@ -22,14 +24,18 @@ const PLAN_LIMITS: Record<string, PlanLimits> = {
     queryPerformanceEnabled: false,
     indexAdvisorEnabled: false,
     vacuumAdvisorEnabled: false,
+    replicationEnabled: false,
+    logInsightsEnabled: false,
     retentionDays: 1,
   },
   pro: {
     maxDatabases: Infinity,
     alertingEnabled: true,
     queryPerformanceEnabled: true,
-    indexAdvisorEnabled: true,
-    vacuumAdvisorEnabled: true,
+    indexAdvisorEnabled: false,    // Team-only per spec v3 pricing
+    vacuumAdvisorEnabled: false,   // Team-only per spec v3 pricing
+    replicationEnabled: false,     // Team-only per spec v3 pricing
+    logInsightsEnabled: false,     // Team-only per spec v3 pricing
     retentionDays: 30,
   },
   team: {
@@ -38,6 +44,8 @@ const PLAN_LIMITS: Record<string, PlanLimits> = {
     queryPerformanceEnabled: true,
     indexAdvisorEnabled: true,
     vacuumAdvisorEnabled: true,
+    replicationEnabled: true,
+    logInsightsEnabled: true,
     retentionDays: 90,
   },
 };

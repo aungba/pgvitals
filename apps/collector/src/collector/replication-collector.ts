@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
 import { safeQuery } from "../lib/safe-query.js";
 import { config } from "../config.js";
+import type { GeneratedHint } from "./rules-engine.js";
 
 /* ===================================================================
    Replication Lag Collector — Phase 7
@@ -62,14 +63,21 @@ FROM pg_stat_replication
 ORDER BY byte_lag DESC
 `;
 
+// Thresholds for replication lag alerting
+const REPLICATION_LAG_WARNING_SECONDS = 30;
+const REPLICATION_LAG_CRITICAL_SECONDS = 120;
+
 /**
  * Collects replication lag stats for a monitored database.
  * Silently skips if the database has no replicas.
+ * Returns hints for replication lag alerting.
  */
 export async function collectReplicationLag(
   monitoredDbId: string,
   log: FastifyBaseLogger
-): Promise<void> {
+): Promise<GeneratedHint[]> {
+  const hints: GeneratedHint[] = [];
+
   const [monitoredDb] = await db
     .select()
     .from(monitoredDatabases)
@@ -78,7 +86,7 @@ export async function collectReplicationLag(
 
   if (!monitoredDb) {
     log.warn({ monitoredDbId }, "DB not found for replication lag collection");
-    return;
+    return hints;
   }
 
   const connectionString = decrypt(
@@ -96,7 +104,7 @@ export async function collectReplicationLag(
     // No replicas — silently skip
     if (rows.length === 0) {
       log.debug({ monitoredDbId }, "No replicas detected, skipping replication lag collection");
-      return;
+      return hints;
     }
 
     const now = new Date();
@@ -130,6 +138,68 @@ export async function collectReplicationLag(
       { monitoredDbId, replicaCount: snapshotRows.length },
       "Replication lag stats collected"
     );
+
+    // --- Generate replication lag hints with root-cause differentiation ---
+    for (const r of rows) {
+      const replicaName = r.application_name || "unknown";
+      const byteLag = parseInt(r.byte_lag, 10) || 0;
+      const replayLagMs = r.replay_lag_ms ? parseFloat(r.replay_lag_ms) : null;
+      const timeLagSeconds = replayLagMs != null ? replayLagMs / 1000 : null;
+      const state = r.state || "unknown";
+
+      // Rule: Replica not in streaming state
+      if (state !== "streaming") {
+        const rootCause = state === "catchup"
+          ? `Replica "${replicaName}" is in catchup mode — likely recovering after a restart or network disruption. It should return to streaming once caught up.`
+          : `Replica "${replicaName}" is in "${state}" state instead of streaming. This may indicate a connection issue, misconfigured replica, or the replica being down.`;
+
+        hints.push({
+          ruleType: "replication_not_streaming",
+          severity: "critical",
+          title: `Replica not streaming: ${replicaName}`,
+          description: rootCause,
+          metadata: {
+            replica_name: replicaName,
+            replication_state: state,
+            byte_lag: byteLag,
+            client_addr: r.client_addr,
+          },
+        });
+        continue; // don't also fire a lag alert for the same replica
+      }
+
+      // Rule: Replication time lag exceeds thresholds
+      if (timeLagSeconds != null && timeLagSeconds > REPLICATION_LAG_WARNING_SECONDS) {
+        const isCritical = timeLagSeconds > REPLICATION_LAG_CRITICAL_SECONDS;
+
+        // Root-cause differentiation
+        let rootCause: string;
+        if (byteLag > 100_000_000 && timeLagSeconds < 60) {
+          // High byte lag but moderate time lag → heavy write load on primary
+          rootCause = `Replica "${replicaName}" has ${(byteLag / 1_000_000).toFixed(0)}MB byte lag but only ${timeLagSeconds.toFixed(0)}s time lag. This typically indicates heavy write load on the primary — the replica is keeping up in time but has a large backlog of WAL to replay.`;
+        } else if (byteLag < 1_000_000 && timeLagSeconds > 60) {
+          // Low byte lag but high time lag → replica is slow to replay
+          rootCause = `Replica "${replicaName}" has low byte lag (${(byteLag / 1_000).toFixed(0)}KB) but ${timeLagSeconds.toFixed(0)}s time lag. The replica may be under heavy read load, running long queries that block WAL replay, or has insufficient resources (CPU/IO).`;
+        } else {
+          // Default: generic lag warning
+          rootCause = `Replica "${replicaName}" is ${timeLagSeconds.toFixed(0)}s behind with ${(byteLag / 1_000_000).toFixed(1)}MB byte lag. Possible causes: network latency, high primary write load, replica resource constraints, or WAL replay blocked by long-running queries on the replica.`;
+        }
+
+        hints.push({
+          ruleType: "replication_lag",
+          severity: isCritical ? "critical" : "warning",
+          title: `Replication lag: ${replicaName} (${timeLagSeconds.toFixed(0)}s)`,
+          description: rootCause,
+          metadata: {
+            replica_name: replicaName,
+            time_lag_seconds: timeLagSeconds,
+            byte_lag: byteLag,
+            replication_state: state,
+            client_addr: r.client_addr,
+          },
+        });
+      }
+    }
   } catch (err) {
     // pg_stat_replication may not be accessible without superuser/replication role
     log.debug(
@@ -137,4 +207,6 @@ export async function collectReplicationLag(
       "Failed to collect replication lag (may require pg_read_all_stats or superuser)"
     );
   }
+
+  return hints;
 }

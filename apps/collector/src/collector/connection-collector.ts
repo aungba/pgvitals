@@ -3,6 +3,7 @@ import { db, snapshots, sessionsSnapshot, monitoredDatabases } from "@pgvitals/d
 import { eq } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
 import { safeQuery } from "../lib/safe-query.js";
+import { redactQueryLiterals } from "../lib/redact-query.js";
 import { config } from "../config.js";
 
 /** Raw row from pg_stat_activity */
@@ -176,7 +177,7 @@ export async function collectSnapshot(
       clientAddr: s.client_addr,
       state: s.state,
       stateDurationSeconds: s.state_duration_seconds,
-      queryText: s.query_text,
+      queryText: s.query_text ? redactQueryLiterals(s.query_text) : null,
       queryStart: s.query_start ? new Date(s.query_start) : null,
       waitEventType: s.wait_event_type,
       waitEvent: s.wait_event,

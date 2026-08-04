@@ -34,7 +34,7 @@ import Link from "next/link";
    Query Performance Page — Phase 4
    =================================================================== */
 
-type SortBy = "total_time" | "calls" | "mean_time" | "rows";
+type SortBy = "total_time" | "calls" | "mean_time" | "rows" | "temp_blks";
 
 function formatMs(ms: number): string {
   if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`;
@@ -248,6 +248,7 @@ export default function QueriesPage() {
                 ["calls", "Calls"],
                 ["mean_time", "Avg Time"],
                 ["rows", "Rows"],
+                ["temp_blks", "Disk Spill"],
               ] as [SortBy, string][]).map(([key, label]) => (
                 <button
                   key={key}
@@ -386,12 +387,13 @@ export default function QueriesPage() {
                     <th className="alert-table-th" style={{ width: 90 }}>Avg Time</th>
                     <th className="alert-table-th" style={{ width: 70 }}>% Time</th>
                     <th className="alert-table-th" style={{ width: 80 }}>Rows</th>
+                    <th className="alert-table-th" style={{ width: 70 }}>Rows/Call</th>
                   </tr>
                 </thead>
                 <tbody>
                   {queries.map((q) => (
                     <tr
-                      key={q.queryid}
+                      key={q.id}
                       className="alert-table-row"
                       style={{
                         cursor: "pointer",
@@ -456,6 +458,9 @@ export default function QueriesPage() {
                       </td>
                       <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
                         {formatNumber(q.rowsReturned)}
+                      </td>
+                      <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                        {q.rowsPerCall?.toFixed(1) ?? "—"}
                       </td>
                     </tr>
                   ))}

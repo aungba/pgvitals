@@ -23,6 +23,9 @@ function formatAlertType(type: string): string {
     blocking_chain: "Blocking Chain",
     connection_exhaustion: "Connection Exhaustion",
     connection_spike: "Connection Spike",
+    replication_lag: "Replication Lag",
+    monitoring_failure: "Monitoring Failure",
+    pool_exhaustion: "Pool Exhaustion",
   };
   return names[type] ?? type;
 }

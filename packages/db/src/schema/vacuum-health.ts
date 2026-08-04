@@ -46,6 +46,8 @@ export const tableBloatStats = pgTable(
     idxScan: bigint("idx_scan", { mode: "number" }).default(0).notNull(),
     cacheHitRatio: doublePrecision("cache_hit_ratio"),
     idxCacheHitRatio: doublePrecision("idx_cache_hit_ratio"),
+    estimatedBloatBytes: bigint("estimated_bloat_bytes", { mode: "number" }),
+    estimatedBloatPct: doublePrecision("estimated_bloat_pct"),
   },
   (table) => [primaryKey({ columns: [table.id, table.capturedAt] })]
 );

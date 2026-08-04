@@ -13,6 +13,7 @@ export interface Config {
   stripeWebhookSecret: string;
   stripeProPriceId: string;
   stripeTeamPriceId: string;
+  dashboardBaseUrl: string;
 }
 
 function requireEnv(name: string): string {
@@ -36,5 +37,6 @@ export const config: Config = {
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
   stripeProPriceId: process.env.STRIPE_PRO_PRICE_ID ?? "",
   stripeTeamPriceId: process.env.STRIPE_TEAM_PRICE_ID ?? "",
+  dashboardBaseUrl: process.env.DASHBOARD_BASE_URL ?? "http://localhost:3000",
 };
 

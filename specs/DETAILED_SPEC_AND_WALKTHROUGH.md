@@ -1,7 +1,7 @@
 # PG Vitals — Detailed Technical Specification & Codebase Walkthrough
 
-> **Version:** 0.2.0 | **Last Updated:** 2026-08-02
-> **Status:** All 8 product phases implemented (backend + frontend). Auth (Clerk) and Billing (Stripe) require external accounts.
+> **Version:** 0.3.0 | **Last Updated:** 2026-08-05
+> **Status:** All 10 product phases implemented (backend + frontend). Auth (Clerk) and Billing (Stripe) require external accounts.
 
 ---
 
@@ -63,7 +63,10 @@ Unlike pganalyze, pgHero, or Datadog, PG Vitals correlates **database-level symp
 │  ├─ Vacuum Health Collector │  → pg_stat_user_tables, pg_stat_database
 │  ├─ Replication Collector   │  → pg_stat_replication, LSN diff
 │  ├─ Log Insights Collector  │  → pg_stat_database errors, deadlocks
-│  └─ Data Retention          │  → 30-day purge cycle
+│  ├─ Plan Regression Collector│  → EXPLAIN capture + plan shape diffing
+│  ├─ PgBouncer Collector     │  → SHOW POOLS metrics + pool exhaustion
+│  ├─ Schema Diff Collector   │  → information_schema DDL change detection
+│  └─ Data Retention          │  → tier-based purge (Free=1d, Pro=30d, Team=90d)
 └────────────┬──────────────┘
              │ Writes via Drizzle ORM
              ▼
@@ -124,7 +127,9 @@ pgvitals/
 │   │   │   │   ├── replication.ts    # Replication lag monitor
 │   │   │   │   ├── log-insights.ts   # Log insight events + error stats
 │   │   │   │   ├── org.ts            # Organization & team member management
-│   │   │   │   └── billing.ts        # Billing/subscription routes
+│   │   │   │   ├── billing.ts        # Billing/subscription routes
+│   │   │   │   ├── schema-events.ts  # Schema change event history
+│   │   │   │   └── pooler.ts         # PgBouncer pool metrics & history
 │   │   │   ├── collector/
 │   │   │   │   ├── scheduler.ts      # BullMQ queue/worker lifecycle
 │   │   │   │   ├── connection-collector.ts  # pg_stat_activity + pg_locks polling
@@ -136,7 +141,10 @@ pgvitals/
 │   │   │   │   ├── query-suggestions.ts     # AI-style query optimization hints
 │   │   │   │   ├── replication-collector.ts  # pg_stat_replication polling
 │   │   │   │   ├── log-insights-collector.ts # Error/deadlock/conflict tracking
-│   │   │   │   └── retention.ts      # 30-day data purge
+│   │   │   │   ├── plan-regression-collector.ts # EXPLAIN plan shape tracking
+│   │   │   │   ├── pooler-collector.ts       # PgBouncer SHOW POOLS metrics
+│   │   │   │   ├── schema-diff-collector.ts  # DDL change detection via diffing
+│   │   │   │   └── retention.ts      # Tier-based data purge
 │   │   │   ├── alerting/
 │   │   │   │   ├── engine.ts         # Alert evaluation, dedup, fire/resolve
 │   │   │   │   ├── fingerprint.ts    # Alert deduplication fingerprints
@@ -147,7 +155,9 @@ pgvitals/
 │   │   │   │   └── plan-limits.ts    # Plan-based feature gating
 │   │   │   └── lib/
 │   │   │       ├── encryption.ts     # AES-256-GCM encrypt/decrypt
-│   │   │       └── safe-query.ts     # Read-only SQL execution safety net
+│   │   │       ├── safe-query.ts     # Read-only SQL execution safety net
+│   │   │       ├── redact-query.ts   # Query text literal redaction (PII)
+│   │   │       └── cost-model.ts     # Cost-per-query USD estimation
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
@@ -201,8 +211,11 @@ pgvitals/
 │       │       ├── index-advisor.ts   # index_recommendations
 │       │       ├── vacuum-health.ts   # table_bloat_stats, db_health_snapshots, table_size_history
 │       │       ├── replication.ts     # replication_snapshots
-│       │       └── log-insights.ts    # log_insights, db_error_stats
-│       ├── drizzle/                   # Generated SQL migrations (10 files)
+│       │       ├── log-insights.ts    # log_insights, db_error_stats
+│       │       ├── schema-events.ts   # schema_events, schema_snapshots
+│       │       ├── query-plans.ts     # query_plan_snapshots
+│       │       └── pooler.ts          # pooler_snapshots
+│       ├── drizzle/                   # Generated SQL migrations (12 files)
 │       ├── drizzle.config.ts
 │       ├── package.json
 │       └── tsconfig.json
@@ -274,6 +287,10 @@ erDiagram
     monitored_databases ||--o{ replication_snapshots : monitors
     monitored_databases ||--o{ log_insights : captures
     monitored_databases ||--o{ db_error_stats : tracks
+    monitored_databases ||--o{ schema_events : detects
+    monitored_databases ||--o{ schema_snapshots : stores
+    monitored_databases ||--o{ query_plan_snapshots : tracks
+    monitored_databases ||--o{ pooler_snapshots : monitors
 ```
 
 ### 5.2 Tables — Detailed Schema
@@ -298,6 +315,8 @@ erDiagram
 | `replication_snapshots` | `captured_at` | Per-replica lag metrics from pg_stat_replication |
 | `log_insights` | `captured_at` | Parsed error/warning events (deadlocks, conflicts, etc.) |
 | `db_error_stats` | `captured_at` | Aggregate error counters from pg_stat_database |
+| `query_plan_snapshots` | `captured_at` | EXPLAIN plan shapes for regression detection |
+| `pooler_snapshots` | `captured_at` | PgBouncer pool metrics (cl_active, cl_waiting, etc.) |
 
 > [!NOTE]
 > Hypertables use composite primary keys `(id, partition_column)` because TimescaleDB requires the partitioning column in any unique index.
@@ -313,6 +332,8 @@ erDiagram
 | `index_recommendations` | Unused/missing index suggestions |
 | `db_health_snapshots` | Cluster-wide health metrics (cache hit, checkpoints, etc.) |
 | `query_suggestions` | AI-style query optimization suggestions |
+| `schema_events` | DDL change events detected via schema diffing |
+| `schema_snapshots` | Periodic schema state snapshots for diffing |
 
 ### 5.3 Enums
 
@@ -321,7 +342,7 @@ erDiagram
 | `plan_tier` | `free`, `pro`, `team` |
 | `user_role` | `owner`, `admin`, `member` |
 | `environment` | `production`, `staging`, `development` |
-| `alert_type` | `idle_in_transaction`, `connection_hog`, `blocking_chain`, `connection_exhaustion`, `connection_spike` |
+| `alert_type` | `idle_in_transaction`, `connection_hog`, `blocking_chain`, `connection_exhaustion`, `connection_spike`, `replication_lag`, `monitoring_failure`, `pool_exhaustion` |
 | `alert_severity` | `warning`, `critical` |
 | `recommendation_type` | `unused`, `missing` |
 | `log_severity` | `error`, `warning`, `info` |
@@ -330,6 +351,7 @@ erDiagram
 
 **`monitored_databases`** — Central entity linking all monitoring data:
 - `connection_string_encrypted` — AES-256-GCM encrypted (format: `iv:authTag:ciphertext`)
+- `pgbouncer_connection_string_encrypted` — Optional AES-256-GCM encrypted PgBouncer admin connection
 - `is_active` — Controls whether the scheduler polls this database (stored as varchar `"true"/"false"`)
 - All child tables cascade on delete
 
@@ -349,7 +371,7 @@ erDiagram
 
 ### 5.5 Migrations
 
-6 migration files in `drizzle/`:
+12 migration files in `drizzle/`:
 
 | Migration | Content |
 |-----------|---------|
@@ -364,6 +386,8 @@ erDiagram
 | `0007_db_health_txid.sql` | TX ID wraparound fields in db_health_snapshots |
 | `0008_replication_snapshots.sql` | Replication lag monitoring snapshots |
 | `0009_log_insights.sql` | Log insights + error stats tables |
+| `0010_spec_sync_gaps.sql` | Replication lag + monitoring failure alert types, bloat estimation columns |
+| `0011_phase_8_10_features.sql` | Schema events, query plan snapshots, pooler snapshots, PgBouncer connection field, pool exhaustion alert type |
 
 The `migrate.ts` script runs Drizzle migrations **then** creates TimescaleDB hypertables idempotently via raw SQL.
 
@@ -398,6 +422,7 @@ Graceful shutdown (`SIGINT`/`SIGTERM`): stops scheduler → closes Fastify → e
 | `pollingIntervalMs` | `POLLING_INTERVAL_MS` | `10000` (10s) | ❌ |
 | `queryStatsIntervalMs` | `QUERY_STATS_INTERVAL_MS` | `300000` (5min) | ❌ |
 | `encryptionKey` | `ENCRYPTION_KEY` | — | ✅ |
+| `dashboardBaseUrl` | `DASHBOARD_BASE_URL` | `http://localhost:3000` | ❌ |
 
 ### 6.3 Scheduler (BullMQ)
 
@@ -419,9 +444,14 @@ collectSnapshot() → evaluateRules() → evaluateAlerts()
 ```
 collectQueryStats() → analyzeIndexes() → collectVacuumHealth()
   → analyzeQuerySuggestions() → collectReplicationLag() → collectLogInsights()
+  → collectPlanSnapshots() → collectPoolerStats()
 ```
 
-**Lifecycle:**
+**Daily jobs** (24h cycle):
+```
+purgeOldData() — tier-based retention (Free=1d, Pro=30d, Team=90d)
+collectSchemaDiff() — DDL change detection for all active databases
+```
 - On startup: clears stale repeatable jobs → schedules for all active databases
 - `scheduleDatabase()` / `unscheduleDatabase()` — called when DBs are added/removed via API
 - `purgeOldData()` — runs on startup + every 24h via `setInterval`
@@ -483,6 +513,9 @@ Generates unique strings per alert type:
 | blocking_chain | `block_chain:{dbId}:{blocked_pid}:{blocking_pid}` |
 | connection_exhaustion | `conn_exhaust:{dbId}` |
 | connection_spike | `conn_spike:{dbId}` |
+| replication_lag | `repl_lag:{dbId}:{replicaName}` |
+| monitoring_failure | `monitor_fail:{dbId}` |
+| pool_exhaustion | `pool_exhaust:{dbId}:{poolName}` |
 
 #### Notifier (`src/alerting/notifier.ts`)
 
@@ -572,8 +605,12 @@ Collects two types of data:
 
 **File:** `src/collector/retention.ts`
 
-- Default: 30-day retention window
+- **Tier-based retention windows:**
+  - Free: 1-day retention
+  - Pro: 30-day retention
+  - Team: 90-day retention
 - Runs on startup + every 24h
+- Determines tier per monitored database via org → plan lookup
 - Purges from 14 tables in order:
   1. `sessions_snapshot` → 2. `snapshots` → 3. `root_cause_hints` → 4. `alerts` (resolved only) → 5. `query_stats` → 6. `explain_captures` → 7. `index_recommendations` (dismissed only) → 8. `table_bloat_stats` → 9. `db_health_snapshots` → 10. `query_suggestions` → 11. `table_size_history` → 12. `replication_snapshots` → 13. `log_insights` → 14. `db_error_stats`
 
@@ -606,7 +643,47 @@ Delta computation:
 - Handles counter resets (PostgreSQL restart)
 - Only generates `log_insights` entries for significant changes
 
-### 6.12 Security Layer
+### 6.14 Plan Regression Collector
+
+**File:** `src/collector/plan-regression-collector.ts`
+
+Detects query execution plan changes that may indicate performance regressions:
+
+1. Runs `EXPLAIN (FORMAT JSON)` (not ANALYZE) for top 20 queries by total time
+2. Extracts plan node types in DFS order and hashes the shape string (SHA-256, 16-char prefix)
+3. Stores plan snapshot in `query_plan_snapshots` hypertable
+4. Compares against previous snapshot for same queryid — if hash differs, generates a regression hint
+5. Root-cause hints distinguish: Index→SeqScan degradation, HashJoin↔NestedLoop flip, general shape change
+6. Detects plan flags: `seq_scan_large_table`, `nested_loop_high_rows`
+
+### 6.15 PgBouncer Collector
+
+**File:** `src/collector/pooler-collector.ts`
+
+Collects PgBouncer pool metrics. Only active when `pgbouncer_connection_string_encrypted` is configured:
+
+1. Connects to PgBouncer admin console with `prepare: false` (PgBouncer doesn't support prepared statements)
+2. Executes `SHOW POOLS` to get per-pool metrics
+3. Stores snapshots in `pooler_snapshots` hypertable
+4. Generates `pool_exhaustion` alerts when `cl_waiting > 0` (warning) or `cl_waiting > 5` (critical)
+5. Silently skips databases with no PgBouncer connection configured
+
+### 6.16 Schema Diff Collector
+
+**File:** `src/collector/schema-diff-collector.ts`
+
+Detects DDL changes (CREATE/DROP table/column/index) via periodic schema diffing:
+
+1. Queries `information_schema.columns` and `pg_indexes` for current schema state
+2. Stores structured snapshot in `schema_snapshots` table
+3. Diffs against previous snapshot detecting:
+   - Table additions/removals (`create_table`, `drop_table`)
+   - Column additions/removals (`add_column`, `drop_column`)
+   - Index additions/removals (`create_index`, `drop_index`)
+4. Generates `schema_events` records for each detected change
+5. Runs daily (not per-poll) to minimize overhead
+
+### 6.17 Security Layer
 
 **Encryption (`src/lib/encryption.ts`):**
 - Algorithm: AES-256-GCM
@@ -620,6 +697,19 @@ Delta computation:
 - Rejects any write operations at the code level (defense in depth)
 - Creates ephemeral connections (max 1, idle timeout 5s)
 - Configurable query timeout (default 10s, override per-call)
+
+**Query Text Redaction (`src/lib/redact-query.ts`):**
+- Strips literal values from SQL query text before storage
+- Replaces: single-quoted strings → `$1`, numeric literals → `$N`, UUID patterns → `$UUID`, hex literals → `$HEX`, boolean literals → `$BOOL`
+- Applied to `pg_stat_activity` query text during connection collection
+- Prevents accidental PII/secret leakage in stored query text
+
+**Cost-Per-Query Estimator (`src/lib/cost-model.ts`):**
+- Estimates monthly IO + CPU cost per query in USD
+- Default cost model based on AWS RDS gp3 pricing ($0.08/M IOPS, ~$0.26/hr vCPU)
+- Customizable via API query parameters
+- Extrapolates from snapshot window to monthly volume
+- Results clearly labeled as directional estimates
 
 ---
 
@@ -738,6 +828,8 @@ Type-safe fetch wrapper with:
 | `GET` | `/api/databases/:id/queries/:queryid` | Query detail + 24h time series |
 | `POST` | `/api/databases/:id/queries/:queryid/explain` | Trigger EXPLAIN capture |
 | `GET` | `/api/databases/:id/queries/:queryid/explains` | List past EXPLAIN captures |
+| `GET` | `/api/databases/:id/queries/cost-estimates` | Estimated monthly cost per query (§2.11) |
+| `GET` | `/api/databases/:id/queries/:queryid/plans` | Plan shape history + regression markers (§2.10) |
 
 ### Index Advisor
 
@@ -770,6 +862,19 @@ Type-safe fetch wrapper with:
 |--------|----------|-------------|
 | `GET` | `/api/databases/:id/log-insights` | Error/warning events (`?hours=&severity=`) |
 | `GET` | `/api/databases/:id/error-stats` | Aggregate error counter history |
+
+### Schema Events
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/databases/:id/schema-events` | DDL change event history (§2.13) |
+
+### PgBouncer Pooler
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/databases/:id/pooler` | Latest PgBouncer pool snapshot (§2.12) |
+| `GET` | `/api/databases/:id/pooler/history` | Pool metrics 24h time series (§2.12) |
 
 ### Organization & Team
 
@@ -854,6 +959,14 @@ sequenceDiagram
     Worker->>CDB: Query pg_stat_activity (error sessions)
     Worker->>CDB: Query pg_stat_bgwriter (checkpoints)
     Worker->>TDB: INSERT db_error_stats + log_insights
+    Worker->>CDB: EXPLAIN (FORMAT JSON) top 20 queries
+    Worker->>TDB: INSERT query_plan_snapshots
+    Worker->>Worker: Diff plan shapes → regression hints
+    opt PgBouncer configured
+        Worker->>CDB: SHOW POOLS (PgBouncer admin)
+        Worker->>TDB: INSERT pooler_snapshots
+        Worker->>Worker: Check cl_waiting → pool exhaustion hints
+    end
 ```
 
 ### 9.3 Adding a New Database
@@ -978,8 +1091,8 @@ pnpm dev                          # Start collector (3001) + web (3000)
 |-------|-------------|---------|----------|--------|
 | 1 | Connection & Session Monitoring | ✅ Full | ✅ Full | **Complete** |
 | 1 | Root-Cause Hints (Rules Engine) | ✅ 5 rules | ✅ HintCard | **Complete** |
-| 2 | Alerting Engine | ✅ Dedup + cooldown | ✅ Rules UI | **Complete** |
-| 2 | Slack Integration | ✅ Block Kit | ✅ Test button | **Complete** |
+| 2 | Alerting Engine | ✅ Dedup + cooldown + meta-alerting | ✅ Rules UI | **Complete** |
+| 2 | Slack Integration | ✅ Block Kit + dashboard link | ✅ Test button | **Complete** |
 | 3 | Auth (Clerk) | ❌ Not implemented | ❌ Not implemented | **Not started** |
 | 3 | Billing (Stripe) | ❌ Not implemented | ❌ Not implemented | **Not started** |
 | 3 | Multi-tenancy | ✅ Org CRUD + member invite/role/remove APIs | ✅ Team settings page + sidebar nav | **Complete** |
@@ -988,17 +1101,22 @@ pnpm dev                          # Start collector (3001) + web (3000)
 | 4 | Query Trend Delta (week-over-week) | ✅ 7-day comparison | ✅ ↑/↓ badge per query | **Complete** |
 | 5 | Index Advisor | ✅ Unused + missing detection | ✅ Full | **Complete** |
 | 5 | Cache Hit Ratio Monitor | ✅ DB-level + per-table (`pg_statio_user_tables`) | ✅ Health page table + chart | **Complete** |
-| 6 | VACUUM/Bloat Advisor | ✅ Table bloat + health | ✅ Full | **Complete** |
+| 6 | VACUUM/Bloat Advisor | ✅ Table bloat + health + per-table guidance | ✅ Full | **Complete** |
 | 6 | TX ID Wraparound Risk | ✅ `age(datfrozenxid)` tracking | ✅ Warning/critical badge + alert banner | **Complete** |
 | 6 | Table & Disk Growth Forecast | ✅ Daily size sampling + 7-day projection | ✅ Growth rate + days-to-limit table | **Complete** |
-| 7 | Replication Lag Monitor | ✅ `pg_stat_replication` polling + LSN diff | ✅ Per-replica state/lag table + warning banner | **Complete** |
+| 7 | Replication Lag Monitor | ✅ `pg_stat_replication` + root-cause hints | ✅ Per-replica state/lag table + warning banner | **Complete** |
 | 8 | Log Insights | ✅ `pg_stat_database` + `pg_stat_activity` + delta tracking | ✅ Error/warning table + summary cards + filters | **Complete** |
-| 3 | Multi-tenancy | ✅ Org CRUD + member invite/role/remove APIs | ✅ Team settings page + sidebar nav | **Complete** |
-| — | Data Retention | ✅ 30-day purge | — | **Complete** |
+| 8 | Schema Change Markers | ✅ Schema diff collector + event tracking | ✅ API types | **Backend complete** |
+| 9 | Query Plan Regression Detection | ✅ EXPLAIN capture + plan shape hash diffing | ✅ API types | **Backend complete** |
+| 9 | PgBouncer Awareness | ✅ Pool metrics + pool exhaustion alerting | ✅ API types | **Backend complete** |
+| 10 | Cost-Per-Query Estimator | ✅ IO + CPU cost model with RDS defaults | ✅ API types | **Backend complete** |
+| — | Data Retention | ✅ Tier-based (Free=1d, Pro=30d, Team=90d) | — | **Complete** |
 | — | Email Alerting | ✅ Nodemailer SMTP + HTML templates | ✅ SMTP config form + test button | **Complete** |
+| — | Query Text Redaction | ✅ Literal stripping before storage | — | **Complete** |
+| — | Plan-based Feature Gating | ✅ Pro/Team tier enforcement | — | **Complete** |
 
 > [!IMPORTANT]
-> **Phases 1–8 (backend + frontend) are fully implemented.** Phase 3 auth (Clerk) and billing (Stripe) require external service accounts to activate.
+> **Phases 1–10 (backend) are fully implemented.** Phases 8–10 have API + collector backends but frontend UI pages are pending. Phase 3 auth (Clerk) and billing (Stripe) require external service accounts to activate.
 
 ---
 
@@ -1017,8 +1135,12 @@ pnpm dev                          # Start collector (3001) + web (3000)
 | Feature | Priority | Notes |
 |---------|----------|-------|
 | Billing (Stripe) | Medium | Schema has `plan_tier` + `stripe_customer_id` ready |
+| HypoPG index simulation | Medium | Requires `hypopg` extension on customer DB — opt-in enhancement |
+| Onboarding wizard | Medium | Multi-step setup flow for new users |
+| Alert feedback (thumbs up/down) | Low | Requires schema + UI for feedback mechanism |
 | PagerDuty / Teams / generic webhook | Low | Notifier architecture supports extension |
 | EXPLAIN ANALYZE (with execution) | Low | Currently uses `EXPLAIN` without `ANALYZE` for safety |
+| Frontend pages for Phases 8–10 | Medium | Schema events, plan regression, PgBouncer, cost estimator pages |
 
 ### Technical Debt
 

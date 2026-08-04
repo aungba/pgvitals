@@ -135,7 +135,7 @@ export async function analyzeQuerySuggestions(
             queryText: stat.queryText,
             suggestionType: "regression",
             title: "Performance regression detected",
-            description: `This query has slowed ${Math.round(pctChange)}% over 7 days (${stat.meanTimeMs.toFixed(1)}ms → ${oldStat.meanTimeMs.toFixed(1)}ms). Check table growth, missing VACUUM, or a recent schema change.`,
+            description: `This query has slowed ${Math.round(pctChange)}% over 7 days (${oldStat.meanTimeMs.toFixed(1)}ms → ${stat.meanTimeMs.toFixed(1)}ms). Check table growth, missing VACUUM, or a recent schema change.`,
             severity: pctChange > 100 ? "critical" : "warning",
             metadata: {
               currentMeanMs: stat.meanTimeMs,

@@ -278,8 +278,70 @@ function serializeBloatRow(row: typeof tableBloatStats.$inferSelect) {
     idxScan: row.idxScan,
     cacheHitRatio: row.cacheHitRatio,
     idxCacheHitRatio: row.idxCacheHitRatio,
+    estimatedBloatBytes: row.estimatedBloatBytes ?? null,
+    estimatedBloatPct: row.estimatedBloatPct ?? null,
     capturedAt: row.capturedAt.toISOString(),
+    // Per-table VACUUM guidance (computed, not stored)
+    vacuumGuidance: generateVacuumGuidance(row),
   };
+}
+
+/**
+ * Generates per-table VACUUM guidance based on current stats.
+ * Returns null if the table looks healthy.
+ */
+function generateVacuumGuidance(row: typeof tableBloatStats.$inferSelect): {
+  severity: "info" | "warning" | "critical";
+  action: string;
+  reason: string;
+} | null {
+  const deadRatio = row.deadTupRatio;
+  const bloatPct = row.estimatedBloatPct ?? 0;
+  const lastVacuumAt = row.lastVacuum ?? row.lastAutovacuum;
+  const hoursSinceVacuum = lastVacuumAt
+    ? (Date.now() - lastVacuumAt.getTime()) / (1000 * 60 * 60)
+    : null;
+
+  // Critical: very high dead tuple ratio or massive bloat
+  if (deadRatio > 30 || bloatPct > 50) {
+    const tableFull = `${row.schemaName}.${row.tableName}`;
+    return {
+      severity: "critical",
+      action: `VACUUM (VERBOSE) ${tableFull};`,
+      reason: deadRatio > 30
+        ? `${deadRatio.toFixed(1)}% dead tuples — autovacuum may be blocked or too slow. Manual VACUUM recommended.`
+        : `~${bloatPct.toFixed(0)}% estimated bloat. Run VACUUM FULL (requires downtime) or pg_repack to reclaim space.`,
+    };
+  }
+
+  // Warning: elevated dead tuples or no vacuum in a long time
+  if (deadRatio > 10 || (hoursSinceVacuum != null && hoursSinceVacuum > 168)) {
+    const tableFull = `${row.schemaName}.${row.tableName}`;
+    if (hoursSinceVacuum != null && hoursSinceVacuum > 168) {
+      return {
+        severity: "warning",
+        action: `VACUUM ANALYZE ${tableFull};`,
+        reason: `No vacuum in ${Math.round(hoursSinceVacuum / 24)} days. Run VACUUM ANALYZE to update statistics and reclaim space.`,
+      };
+    }
+    return {
+      severity: "warning",
+      action: `VACUUM ANALYZE ${tableFull};`,
+      reason: `${deadRatio.toFixed(1)}% dead tuples. Consider running VACUUM ANALYZE to keep query planner statistics fresh.`,
+    };
+  }
+
+  // Info: moderate bloat worth noting
+  if (bloatPct > 20) {
+    const tableFull = `${row.schemaName}.${row.tableName}`;
+    return {
+      severity: "info",
+      action: `VACUUM ${tableFull};`,
+      reason: `~${bloatPct.toFixed(0)}% estimated bloat. Standard VACUUM may help; VACUUM FULL or pg_repack would be more effective but requires downtime.`,
+    };
+  }
+
+  return null;
 }
 
 function serializeHealthRow(row: typeof dbHealthSnapshots.$inferSelect) {

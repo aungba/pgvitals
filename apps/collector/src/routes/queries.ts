@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
-import { db, queryStats, explainCaptures, querySuggestions, monitoredDatabases } from "@pgvitals/db";
-import { eq, and, desc, gte, sql } from "drizzle-orm";
+import { db, queryStats, explainCaptures, querySuggestions, monitoredDatabases, queryPlanSnapshots } from "@pgvitals/db";
+import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
 import { config } from "../config.js";
 import { checkPgStatStatements } from "../collector/query-stats-collector.js";
 import { captureExplain } from "../collector/explain-capture.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
+import { estimateQueryCosts } from "../lib/cost-model.js";
 
 /* ===================================================================
    Query Performance Routes — Phase 4
@@ -67,7 +68,7 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
 
   /**
    * GET /api/databases/:id/queries
-   * List top queries, sorted by total_time, calls, or mean_time.
+   * List top queries, sorted by total_time, calls, mean_time, rows, or temp_blks.
    */
   app.get<{
     Params: { id: string };
@@ -110,6 +111,9 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
             break;
           case "rows":
             orderByCol = desc(queryStats.rowsReturned);
+            break;
+          case "temp_blks":
+            orderByCol = desc(queryStats.tempBlksWritten);
             break;
           default: // total_time
             orderByCol = desc(queryStats.totalTimeMs);
@@ -168,6 +172,37 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
           // Non-critical — trends are optional
         }
 
+        // Compute first_seen / last_seen per queryid from existing query_stats data
+        const queryIds = queries.map((q) => q.queryid);
+        const firstLastMap = new Map<number, { firstSeen: string; lastSeen: string }>();
+        if (queryIds.length > 0) {
+          try {
+            const firstLastRows = await db
+              .select({
+                queryid: queryStats.queryid,
+                firstSeen: sql<string>`MIN(${queryStats.capturedAt})::text`,
+                lastSeen: sql<string>`MAX(${queryStats.capturedAt})::text`,
+              })
+              .from(queryStats)
+              .where(
+                and(
+                  eq(queryStats.monitoredDbId, id),
+                  inArray(queryStats.queryid, queryIds)
+                )
+              )
+              .groupBy(queryStats.queryid);
+
+            for (const row of firstLastRows) {
+              firstLastMap.set(row.queryid, {
+                firstSeen: row.firstSeen,
+                lastSeen: row.lastSeen,
+              });
+            }
+          } catch {
+            // Non-critical — first/last seen are optional
+          }
+        }
+
         return reply.send({
           queries: queries.map((q) => {
             const serialized = serializeQueryStat(q);
@@ -176,7 +211,13 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
             if (oldMean != null && oldMean > 0) {
               meanTimeTrend = Math.round(((q.meanTimeMs - oldMean) / oldMean) * 1000) / 10; // e.g. 32.5 means +32.5%
             }
-            return { ...serialized, meanTimeTrend };
+            const firstLast = firstLastMap.get(q.queryid);
+            return {
+              ...serialized,
+              meanTimeTrend,
+              firstSeen: firstLast?.firstSeen ?? null,
+              lastSeen: firstLast?.lastSeen ?? null,
+            };
           }),
           latestCapturedAt: latestCapture.capturedAt.toISOString(),
         });
@@ -407,6 +448,148 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
       }
     }
   );
+
+  /**
+   * GET /api/databases/:id/queries/cost-estimates
+   * Estimate monthly cost per query based on I/O and CPU metrics.
+   * Spec §2.11 — Cost-Per-Query Estimator
+   */
+  app.get<{
+    Params: { id: string };
+    Querystring: { costPerIop?: string; costPerCpuSecond?: string };
+  }>(
+    "/api/databases/:id/queries/cost-estimates",
+    { preHandler: [authMiddleware, requireFeature("queryPerformanceEnabled")] },
+    async (request, reply) => {
+      const { id } = request.params;
+
+      try {
+        // Get latest capture time
+        const [latestCapture] = await db
+          .select({ capturedAt: queryStats.capturedAt })
+          .from(queryStats)
+          .where(eq(queryStats.monitoredDbId, id))
+          .orderBy(desc(queryStats.capturedAt))
+          .limit(1);
+
+        if (!latestCapture) {
+          return reply.send({
+            disclaimer: "These are directional estimates based on I/O and CPU metrics, not precise billing figures.",
+            estimates: [],
+          });
+        }
+
+        // Fetch all queries from latest snapshot
+        const queries = await db
+          .select()
+          .from(queryStats)
+          .where(
+            and(
+              eq(queryStats.monitoredDbId, id),
+              eq(queryStats.capturedAt, latestCapture.capturedAt)
+            )
+          )
+          .orderBy(desc(queryStats.totalTimeMs))
+          .limit(50);
+
+        // Build custom cost model if params provided
+        const customModel = {
+          costPerIop: request.query.costPerIop
+            ? parseFloat(request.query.costPerIop)
+            : undefined,
+          costPerCpuSecond: request.query.costPerCpuSecond
+            ? parseFloat(request.query.costPerCpuSecond)
+            : undefined,
+          blockSizeBytes: 8192,
+        };
+
+        const costModelArg = (customModel.costPerIop || customModel.costPerCpuSecond)
+          ? {
+              costPerIop: customModel.costPerIop ?? 0.00000008,
+              costPerCpuSecond: customModel.costPerCpuSecond ?? 0.00004,
+              blockSizeBytes: 8192,
+            }
+          : undefined;
+
+        const estimates = estimateQueryCosts(
+          queries.map((q) => ({
+            queryid: q.queryid,
+            queryText: q.queryText,
+            calls: q.calls,
+            totalTimeMs: q.totalTimeMs,
+            sharedBlksRead: q.sharedBlksRead,
+          })),
+          24, // assume 24h snapshot window
+          costModelArg
+        );
+
+        // Sort by total estimated cost desc
+        estimates.sort((a, b) => b.estimatedTotalCostPerMonth - a.estimatedTotalCostPerMonth);
+
+        return reply.send({
+          disclaimer: "These are directional estimates based on I/O and CPU metrics, not precise billing figures.",
+          latestCapturedAt: latestCapture.capturedAt.toISOString(),
+          estimates,
+        });
+      } catch (err) {
+        request.log.error({ err }, "Failed to compute cost estimates");
+        return reply.status(500).send({ error: "Failed to compute cost estimates" });
+      }
+    }
+  );
+
+  /**
+   * GET /api/databases/:id/queries/:queryid/plans
+   * List plan snapshots for a query (plan regression tracking).
+   * Spec §2.10
+   */
+  app.get<{ Params: { id: string; queryid: string } }>(
+    "/api/databases/:id/queries/:queryid/plans",
+    { preHandler: [authMiddleware, requireFeature("queryPerformanceEnabled")] },
+    async (request, reply) => {
+      const { id, queryid } = request.params;
+      const queryidNum = parseInt(queryid, 10);
+
+      try {
+        const plans = await db
+          .select()
+          .from(queryPlanSnapshots)
+          .where(
+            and(
+              eq(queryPlanSnapshots.monitoredDbId, id),
+              eq(queryPlanSnapshots.queryid, queryidNum)
+            )
+          )
+          .orderBy(desc(queryPlanSnapshots.capturedAt))
+          .limit(50);
+
+        // Detect regressions between consecutive snapshots
+        const plansWithRegression = plans.map((plan, i) => {
+          const next = plans[i + 1]; // next is older
+          let regression: string | null = null;
+          if (next && plan.planShapeHash !== next.planShapeHash) {
+            regression = `Plan changed from ${next.topNodeType ?? "unknown"} to ${plan.topNodeType ?? "unknown"}`;
+          }
+          return {
+            id: plan.id,
+            queryid: plan.queryid,
+            capturedAt: plan.capturedAt.toISOString(),
+            planShapeHash: plan.planShapeHash,
+            estimatedCost: plan.estimatedCost,
+            topNodeType: plan.topNodeType,
+            planFlags: plan.planFlags,
+            planJson: plan.planJson,
+            regression,
+          };
+        });
+
+        return reply.send({ plans: plansWithRegression });
+      } catch (err) {
+        request.log.error({ err }, "Failed to get plan history");
+        return reply.status(500).send({ error: "Failed to get plan history" });
+      }
+    }
+  );
 }
 
 
@@ -424,6 +607,7 @@ function serializeQueryStat(row: typeof queryStats.$inferSelect) {
     maxTimeMs: row.maxTimeMs,
     minTimeMs: row.minTimeMs,
     rowsReturned: row.rowsReturned,
+    rowsPerCall: row.calls > 0 ? Math.round((row.rowsReturned / row.calls) * 100) / 100 : 0,
     sharedBlksHit: row.sharedBlksHit,
     sharedBlksRead: row.sharedBlksRead,
     tempBlksWritten: row.tempBlksWritten,

@@ -106,11 +106,30 @@ export async function collectQueryStats(
   // 4. Query pg_stat_statements
   log.info({ monitoredDbId }, "Collecting query stats");
 
-  const rows = await safeQuery<PgStatStatementsRow[]>(
-    connectionString,
-    PG_STAT_STATEMENTS_QUERY,
-    { timeoutMs: 15000 }
-  );
+  let rows: PgStatStatementsRow[];
+  try {
+    rows = await safeQuery<PgStatStatementsRow[]>(
+      connectionString,
+      PG_STAT_STATEMENTS_QUERY,
+      { timeoutMs: 15000 }
+    );
+  } catch (err: unknown) {
+    // pg_stat_statements extension may exist in pg_extension but the module
+    // isn't loaded via shared_preload_libraries (PG error code 55000).
+    if (
+      err instanceof Error &&
+      "code" in err &&
+      (err as Record<string, unknown>).code === "55000"
+    ) {
+      log.warn(
+        { monitoredDbId },
+        "pg_stat_statements is installed but not loaded via shared_preload_libraries — skipping query stats collection. " +
+          "Add pg_stat_statements to shared_preload_libraries in postgresql.conf and restart PostgreSQL."
+      );
+      return;
+    }
+    throw err;
+  }
 
   if (rows.length === 0) {
     log.info({ monitoredDbId }, "No query stats found");

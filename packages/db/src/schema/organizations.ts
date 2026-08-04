@@ -51,6 +51,9 @@ export const monitoredDatabases = pgTable("monitored_databases", {
     length: 2048,
   }).notNull(),
   environment: environmentEnum("environment").default("production").notNull(),
+  pgbouncerConnectionStringEncrypted: varchar("pgbouncer_connection_string_encrypted", {
+    length: 2048,
+  }),
   isActive: varchar("is_active", { length: 5 }).default("true").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()

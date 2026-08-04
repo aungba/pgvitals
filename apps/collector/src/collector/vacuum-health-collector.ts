@@ -217,6 +217,38 @@ export async function collectVacuumHealth(
           log.debug({ err, monitoredDbId }, "Failed to collect per-table cache hit ratios");
         }
 
+        // Fetch per-table bloat estimation using pg_class/pg_stats heuristic
+        let bloatEstMap: Map<string, { bloatBytes: number; bloatPct: number }> = new Map();
+        try {
+          const bloatEstRows = await safeQuery<Array<{ relname: string; table_bytes: string; bloat_bytes: string }>>(
+            connectionString,
+            `SELECT
+              s.relname,
+              pg_relation_size(s.relid)::text AS table_bytes,
+              CASE WHEN s.n_live_tup > 0 THEN
+                GREATEST(0,
+                  pg_relation_size(s.relid) -
+                  (s.n_live_tup * COALESCE(
+                    (SELECT sum(avg_width) FROM pg_stats WHERE schemaname = s.schemaname AND tablename = s.relname),
+                    100
+                  ))::bigint
+                )
+              ELSE 0 END::text AS bloat_bytes
+            FROM pg_stat_user_tables s
+            WHERE s.schemaname NOT IN ('pg_catalog', 'information_schema')
+              AND s.relname NOT LIKE '_hyper_%'`,
+            { timeoutMs: 15000 }
+          );
+          for (const br of bloatEstRows) {
+            const tableBytes = parseInt(br.table_bytes, 10) || 0;
+            const bloatBytes = parseInt(br.bloat_bytes, 10) || 0;
+            const bloatPct = tableBytes > 0 ? Math.round((bloatBytes / tableBytes) * 10000) / 100 : 0;
+            bloatEstMap.set(br.relname, { bloatBytes, bloatPct });
+          }
+        } catch (err) {
+          log.debug({ err, monitoredDbId }, "Failed to estimate table bloat");
+        }
+
         const bloatRows = tableRows.map((r) => {
           const nLive = parseInt(r.n_live_tup, 10) || 0;
           const nDead = parseInt(r.n_dead_tup, 10) || 0;
@@ -224,6 +256,7 @@ export async function collectVacuumHealth(
             ? Math.round((nDead / (nLive + nDead)) * 10000) / 100
             : 0;
           const cacheData = cacheHitMap.get(r.relname);
+          const bloatEst = bloatEstMap.get(r.relname);
 
           return {
             monitoredDbId,
@@ -245,6 +278,8 @@ export async function collectVacuumHealth(
             idxScan: parseInt(r.idx_scan, 10) || 0,
             cacheHitRatio: cacheData?.cacheHitRatio ?? null,
             idxCacheHitRatio: cacheData?.idxCacheHitRatio ?? null,
+            estimatedBloatBytes: bloatEst?.bloatBytes ?? null,
+            estimatedBloatPct: bloatEst?.bloatPct ?? null,
           };
         });
 
@@ -386,6 +421,11 @@ export async function collectVacuumHealth(
       if (xidRow && freezeRow) {
         const xidAge = parseInt(xidRow.xid_age, 10) || 0;
         const freezeMaxAge = parseInt(freezeRow.autovacuum_freeze_max_age, 10) || 200000000;
+        // xidPercentUsed is measured against autovacuum_freeze_max_age per spec:
+        //   - >50% → warning (approaching aggressive autovacuum threshold)
+        //   - >80% → critical (anti-wraparound autovacuum should be running)
+        //   - >100% → past the freeze threshold; if autovacuum isn't keeping up, wraparound risk is real
+        // The absolute wraparound limit is 2^31 (~2.1B), much higher than freeze_max_age (default 200M).
         const xidPercentUsed = freezeMaxAge > 0
           ? Math.round((xidAge / freezeMaxAge) * 10000) / 100
           : 0;

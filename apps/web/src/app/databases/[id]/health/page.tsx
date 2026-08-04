@@ -227,7 +227,7 @@ export default function HealthPage() {
             hint={
               (health.xidPercentUsed ?? 0) > 80 ? "Critical — force VACUUM FREEZE"
                 : health.xidAge != null && health.autovacuumFreezeMaxAge != null
-                  ? `${formatNumber(health.xidAge)} / ${formatNumber(health.autovacuumFreezeMaxAge)}`
+                  ? `Age ${formatNumber(health.xidAge)} (freeze threshold: ${formatNumber(health.autovacuumFreezeMaxAge)})`
                   : "No data"
             }
           />
@@ -244,14 +244,19 @@ export default function HealthPage() {
           borderLeft: `3px solid ${(health.xidPercentUsed ?? 0) > 80 ? "var(--signal-critical)" : "var(--signal-warning)"}`,
         }}>
           <div style={{ fontWeight: 600, marginBottom: 4, color: (health.xidPercentUsed ?? 0) > 80 ? "var(--signal-critical)" : "var(--signal-warning)" }}>
-            ☢️ Transaction ID Wraparound Risk: {health.xidPercentUsed?.toFixed(1)}%
+            ☢️ Transaction ID Wraparound Risk: {health.xidPercentUsed?.toFixed(1)}% of freeze threshold
           </div>
           <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-            Your database has consumed {health.xidAge != null ? formatNumber(health.xidAge) : "?"} of {health.autovacuumFreezeMaxAge != null ? formatNumber(health.autovacuumFreezeMaxAge) : "?"} available
-            transaction IDs. {(health.xidPercentUsed ?? 0) > 80
-              ? "At this level, PostgreSQL may force a shutdown to prevent data corruption."
-              : "Approaching dangerous levels."}
-            {" "}Run <code style={{ background: "var(--surface-alt)", padding: "1px 4px", borderRadius: 3, fontFamily: "var(--font-mono)", fontSize: "0.85em" }}>VACUUM FREEZE</code> on large tables to reduce XID age.
+            XID age is {health.xidAge != null ? formatNumber(health.xidAge) : "?"} vs.{" "}
+            <code style={{ background: "var(--surface-alt)", padding: "1px 4px", borderRadius: 3, fontFamily: "var(--font-mono)", fontSize: "0.85em" }}>autovacuum_freeze_max_age</code>{" "}
+            of {health.autovacuumFreezeMaxAge != null ? formatNumber(health.autovacuumFreezeMaxAge) : "?"}.
+            {(health.xidPercentUsed ?? 0) > 100
+              ? " Anti-wraparound autovacuum should have already triggered. If XID age continues to grow, autovacuum may be blocked by long-running transactions or is not keeping up — this can eventually force a PostgreSQL shutdown."
+              : (health.xidPercentUsed ?? 0) > 80
+                ? " Approaching the anti-wraparound autovacuum threshold. PostgreSQL will soon trigger aggressive autovacuum to freeze old tuples."
+                : " Nearing the autovacuum freeze threshold. Verify autovacuum is enabled and running."
+            }
+            {" "}Run <code style={{ background: "var(--surface-alt)", padding: "1px 4px", borderRadius: 3, fontFamily: "var(--font-mono)", fontSize: "0.85em" }}>VACUUM FREEZE</code> on large tables if autovacuum is not keeping up.
           </div>
         </div>
       )}

@@ -326,11 +326,14 @@ export interface QueryStat {
   maxTimeMs: number;
   minTimeMs: number;
   rowsReturned: number;
+  rowsPerCall: number;
   sharedBlksHit: number;
   sharedBlksRead: number;
   tempBlksWritten: number;
   pctOfTotalTime: number;
   meanTimeTrend: number | null; // % change vs 7 days ago (e.g. 32.5 means +32.5%)
+  firstSeen: string | null;
+  lastSeen: string | null;
 }
 
 export interface ExplainCapture {
@@ -789,4 +792,107 @@ export async function removeMember(
     method: "DELETE",
     token,
   });
+}
+
+/* ---------- Cost-Per-Query Estimator (§2.11) ---------- */
+
+export interface QueryCostEstimate {
+  queryid: number;
+  queryText: string;
+  calls: number;
+  totalTimeMs: number;
+  estimatedIoCostPerMonth: number;
+  estimatedCpuCostPerMonth: number;
+  estimatedTotalCostPerMonth: number;
+  breakdown: {
+    diskReadsPerMonth: number;
+    cpuSecondsPerMonth: number;
+  };
+}
+
+export async function getQueryCostEstimates(
+  dbId: string,
+  token?: string,
+): Promise<{ disclaimer: string; estimates: QueryCostEstimate[] }> {
+  return request<{ disclaimer: string; estimates: QueryCostEstimate[] }>(
+    `/api/databases/${dbId}/queries/cost-estimates`,
+    { token },
+  );
+}
+
+/* ---------- Plan Regression Detection (§2.10) ---------- */
+
+export interface PlanSnapshot {
+  id: string;
+  queryid: number;
+  capturedAt: string;
+  planShapeHash: string;
+  estimatedCost: number | null;
+  topNodeType: string | null;
+  planFlags: Record<string, unknown> | null;
+  planJson: unknown;
+  regression: string | null;
+}
+
+export async function getQueryPlanHistory(
+  dbId: string,
+  queryid: number,
+  token?: string,
+): Promise<{ plans: PlanSnapshot[] }> {
+  return request<{ plans: PlanSnapshot[] }>(
+    `/api/databases/${dbId}/queries/${queryid}/plans`,
+    { token },
+  );
+}
+
+/* ---------- Schema Change Markers (§2.13) ---------- */
+
+export interface SchemaEvent {
+  id: string;
+  eventType: string;
+  objectName: string;
+  detectedAt: string;
+  details: Record<string, unknown> | null;
+}
+
+export async function getSchemaEvents(
+  dbId: string,
+  token?: string,
+): Promise<{ events: SchemaEvent[] }> {
+  return request<{ events: SchemaEvent[] }>(
+    `/api/databases/${dbId}/schema-events`,
+    { token },
+  );
+}
+
+/* ---------- PgBouncer Pool Stats (§2.12) ---------- */
+
+export interface PoolerSnapshot {
+  poolName: string;
+  clActive: number;
+  clWaiting: number;
+  svActive: number;
+  svIdle: number;
+  avgWaitTimeMs: number | null;
+  capturedAt: string;
+}
+
+export async function getPoolerStats(
+  dbId: string,
+  token?: string,
+): Promise<{ pools: PoolerSnapshot[] }> {
+  return request<{ pools: PoolerSnapshot[] }>(
+    `/api/databases/${dbId}/pooler`,
+    { token },
+  );
+}
+
+export async function getPoolerHistory(
+  dbId: string,
+  token?: string,
+): Promise<{ history: PoolerSnapshot[] }> {
+  return request<{ history: PoolerSnapshot[] }>(
+    `/api/databases/${dbId}/pooler/history`,
+    { token },
+  );
 }
