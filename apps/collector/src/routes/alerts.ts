@@ -352,4 +352,37 @@ export default async function alertRoutes(app: FastifyInstance): Promise<void> {
       }
     }
   );
+
+  /**
+   * PATCH /api/alerts/:id/feedback — Submit feedback on an alert's usefulness
+   */
+  app.patch<{ Params: { id: string }; Body: { feedback: string } }>(
+    "/api/alerts/:id/feedback",
+    { preHandler: [authMiddleware] },
+    async (request, reply) => {
+      const { id } = request.params;
+      const { feedback } = request.body as { feedback: string };
+
+      if (!feedback || !["useful", "not_useful"].includes(feedback)) {
+        return reply.status(400).send({ error: "feedback must be 'useful' or 'not_useful'" });
+      }
+
+      try {
+        const [updated] = await db
+          .update(alerts)
+          .set({ feedback, feedbackAt: new Date() })
+          .where(eq(alerts.id, id))
+          .returning({ id: alerts.id });
+
+        if (!updated) {
+          return reply.status(404).send({ error: "Alert not found" });
+        }
+
+        return reply.send({ success: true });
+      } catch (err) {
+        request.log.error({ err }, "Failed to update alert feedback");
+        return reply.status(500).send({ error: "Failed to update feedback" });
+      }
+    }
+  );
 }

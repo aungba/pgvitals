@@ -10,6 +10,7 @@ import {
   createAlertRule,
   updateAlertRule,
   testAlertNotification,
+  submitAlertFeedback,
 } from "../../../lib/api";
 import type { Database, Alert, AlertRule } from "../../../lib/api";
 import AlertHistory from "../../../components/AlertHistory";
@@ -90,6 +91,10 @@ export default function AlertsPage() {
       { threshold: number; cooldown: number; enabled: boolean }
     >
   >({});
+  const [pagerdutyKey, setPagerdutyKey] = useState("");
+  const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
+  const [genericWebhookUrl, setGenericWebhookUrl] = useState("");
+  const [genericWebhookSecret, setGenericWebhookSecret] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
@@ -177,6 +182,15 @@ export default function AlertsPage() {
           fromAddress,
           toAddresses: toAddresses.split(",").map((s: string) => s.trim()).filter(Boolean),
         };
+      }
+      if (pagerdutyKey) {
+        channels.pagerduty = { routingKey: pagerdutyKey };
+      }
+      if (teamsWebhookUrl) {
+        channels.teams = { webhookUrl: teamsWebhookUrl };
+      }
+      if (genericWebhookUrl) {
+        channels.webhook = { url: genericWebhookUrl, secret: genericWebhookSecret || undefined };
       }
 
       if (existing) {
@@ -454,6 +468,79 @@ export default function AlertsPage() {
         )}
       </div>
 
+      {/* Additional Channels */}
+      <div className="section-title">Additional Channels</div>
+      <div className="glass-card-static" style={{ padding: "var(--space-lg)", marginBottom: "var(--space-xl)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "var(--space-lg)" }}>
+          {/* PagerDuty */}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: "1.1rem" }}>🔔</span>
+              <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>PagerDuty</span>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Routing Key</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="PagerDuty Events API v2 routing key"
+                value={pagerdutyKey}
+                onChange={(e) => setPagerdutyKey(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Microsoft Teams */}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: "1.1rem" }}>💬</span>
+              <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Microsoft Teams</span>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Webhook URL</label>
+              <input
+                type="url"
+                className="form-input"
+                placeholder="https://outlook.office.com/webhook/..."
+                value={teamsWebhookUrl}
+                onChange={(e) => setTeamsWebhookUrl(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Generic Webhook */}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: "1.1rem" }}>🔗</span>
+              <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Generic Webhook</span>
+            </div>
+            <div className="form-group" style={{ marginBottom: 8 }}>
+              <label className="form-label">Webhook URL</label>
+              <input
+                type="url"
+                className="form-input"
+                placeholder="https://your-service.com/webhook"
+                value={genericWebhookUrl}
+                onChange={(e) => setGenericWebhookUrl(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Signing Secret (optional)</label>
+              <input
+                type="password"
+                className="form-input"
+                placeholder="HMAC-SHA256 shared secret"
+                value={genericWebhookSecret}
+                onChange={(e) => setGenericWebhookSecret(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "var(--space-md)" }}>
+          Channel settings are saved when you save any alert rule above.
+        </div>
+      </div>
+
       {/* Alert Rules */}
       <div className="section-title">Alert Rules</div>
       <div
@@ -576,7 +663,24 @@ export default function AlertsPage() {
           ))}
         </div>
       </div>
-      <AlertHistory alerts={alertList} />
+      <AlertHistory
+        alerts={alertList}
+        onFeedback={async (alertId, feedback) => {
+          try {
+            await submitAlertFeedback(alertId, feedback);
+            // Optimistic update
+            setAlertList((prev) =>
+              prev.map((a) =>
+                a.id === alertId
+                  ? { ...a, feedback, feedbackAt: new Date().toISOString() }
+                  : a
+              )
+            );
+          } catch {
+            // Silently fail — feedback is non-critical
+          }
+        }}
+      />
     </div>
   );
 }

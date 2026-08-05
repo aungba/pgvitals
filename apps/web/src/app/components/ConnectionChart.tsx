@@ -10,6 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  ReferenceLine,
 } from "recharts";
 import type { Snapshot } from "../lib/api";
 import { useChartColors } from "../lib/useChartColors";
@@ -18,8 +19,15 @@ import { useChartColors } from "../lib/useChartColors";
    ConnectionChart — Stacked area chart for connection states over time
    =================================================================== */
 
+interface SchemaEventMarker {
+  eventType: string;
+  objectName: string;
+  detectedAt: string;
+}
+
 interface ConnectionChartProps {
   snapshots: Snapshot[];
+  schemaEvents?: SchemaEventMarker[];
 }
 
 interface ChartDataPoint {
@@ -41,7 +49,7 @@ function formatTime(ts: string): string {
   });
 }
 
-export default function ConnectionChart({ snapshots }: ConnectionChartProps) {
+export default function ConnectionChart({ snapshots, schemaEvents }: ConnectionChartProps) {
   const colors = useChartColors();
 
   if (!snapshots.length) {
@@ -264,6 +272,38 @@ export default function ConnectionChart({ snapshots }: ConnectionChartProps) {
               dot={false}
               activeDot={{ r: 4, strokeWidth: 0, fill: colors.critical }}
             />
+            {/* Schema change markers */}
+            {schemaEvents && schemaEvents.length > 0 && snapshots.length > 0 && (() => {
+              // Build a time range from snapshots to filter relevant markers
+              const startTs = new Date(snapshots[0].timestamp).getTime();
+              const endTs = new Date(snapshots[snapshots.length - 1].timestamp).getTime();
+              return schemaEvents
+                .filter((ev) => {
+                  const ts = new Date(ev.detectedAt).getTime();
+                  return ts >= startTs && ts <= endTs;
+                })
+                .map((ev, i) => {
+                  const ts = new Date(ev.detectedAt);
+                  const timeLabel = ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+                  const eventLabel = ev.eventType.replace(/_/g, " ");
+                  return (
+                    <ReferenceLine
+                      key={`schema-${i}`}
+                      x={timeLabel}
+                      stroke="#A78BFA"
+                      strokeDasharray="4 4"
+                      strokeWidth={2}
+                      label={{
+                        value: `📐 ${eventLabel}`,
+                        position: "top",
+                        fill: "#A78BFA",
+                        fontSize: 10,
+                        fontWeight: 600,
+                      }}
+                    />
+                  );
+                });
+            })()}
           </AreaChart>
         </ResponsiveContainer>
       </div>

@@ -2,6 +2,9 @@ import type { FastifyInstance } from "fastify";
 import { db, indexRecommendations, monitoredDatabases } from "@pgvitals/db";
 import { eq, and, desc } from "drizzle-orm";
 import { analyzeIndexes } from "../collector/index-advisor.js";
+import { simulateIndex, isHypoPGAvailable } from "../collector/hypopg-simulator.js";
+import { decrypt } from "../lib/encryption.js";
+import { config } from "../config.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
 
@@ -180,6 +183,59 @@ export default async function indexRoutes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         request.log.error({ err }, "Failed to run index analysis");
         return reply.status(500).send({ error: "Failed to run index analysis" });
+      }
+    }
+  );
+
+  /**
+   * POST /api/databases/:id/indexes/simulate
+   * Run an ad-hoc HypoPG simulation for a given index DDL and test query.
+   */
+  app.post<{ Params: { id: string }; Body: { indexDdl: string; testQuery: string } }>(
+    "/api/databases/:id/indexes/simulate",
+    { preHandler: [authMiddleware, requireFeature("indexAdvisorEnabled")] },
+    async (request, reply) => {
+      const { id } = request.params;
+      const { indexDdl, testQuery } = request.body as { indexDdl: string; testQuery: string };
+
+      if (!indexDdl || !testQuery) {
+        return reply.status(400).send({ error: "indexDdl and testQuery are required" });
+      }
+
+      try {
+        if (!await verifyDbOwnership(id, request.auth.orgId)) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const [mdb] = await db
+          .select()
+          .from(monitoredDatabases)
+          .where(eq(monitoredDatabases.id, id))
+          .limit(1);
+
+        if (!mdb) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const connectionString = decrypt(mdb.connectionStringEncrypted, config.encryptionKey);
+
+        // Check HypoPG availability
+        const available = await isHypoPGAvailable(connectionString);
+        if (!available) {
+          return reply.status(400).send({
+            error: "HypoPG extension is not installed on this database. Run: CREATE EXTENSION hypopg;",
+          });
+        }
+
+        const result = await simulateIndex(connectionString, indexDdl, testQuery, request.log);
+        if (!result) {
+          return reply.status(400).send({ error: "Simulation failed — check that the DDL and query are valid" });
+        }
+
+        return reply.send(result);
+      } catch (err) {
+        request.log.error({ err }, "Failed to run index simulation");
+        return reply.status(500).send({ error: "Failed to run index simulation" });
       }
     }
   );

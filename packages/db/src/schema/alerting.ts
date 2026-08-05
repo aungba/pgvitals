@@ -49,6 +49,8 @@ export const alerts = pgTable("alerts", {
     .notNull(),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   lastNotifiedAt: timestamp("last_notified_at", { withTimezone: true }),
+  feedback: varchar("feedback", { length: 10 }),
+  feedbackAt: timestamp("feedback_at", { withTimezone: true }),
 });
 
 /**

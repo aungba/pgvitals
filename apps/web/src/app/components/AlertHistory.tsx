@@ -9,6 +9,7 @@ import type { Alert } from "../lib/api";
 
 interface AlertHistoryProps {
   alerts: Alert[];
+  onFeedback?: (alertId: string, feedback: "useful" | "not_useful") => void;
 }
 
 const ALERT_TYPE_NAMES: Record<string, string> = {
@@ -17,6 +18,9 @@ const ALERT_TYPE_NAMES: Record<string, string> = {
   blocking_chain: "Blocking Chain",
   connection_exhaustion: "Connection Exhaustion",
   connection_spike: "Connection Spike",
+  replication_lag: "Replication Lag",
+  monitoring_failure: "Monitoring Failure",
+  pool_exhaustion: "Pool Exhaustion",
 };
 
 function formatTime(ts: string): string {
@@ -29,7 +33,7 @@ function formatTime(ts: string): string {
   });
 }
 
-export default function AlertHistory({ alerts }: AlertHistoryProps) {
+export default function AlertHistory({ alerts, onFeedback }: AlertHistoryProps) {
   if (alerts.length === 0) {
     return (
       <div
@@ -56,6 +60,7 @@ export default function AlertHistory({ alerts }: AlertHistoryProps) {
             <th className="alert-table-th">Root Cause</th>
             <th className="alert-table-th" style={{ width: 140 }}>Fired At</th>
             <th className="alert-table-th" style={{ width: 100 }}>Status</th>
+            <th className="alert-table-th" style={{ width: 90 }}>Helpful?</th>
           </tr>
         </thead>
         <tbody>
@@ -109,6 +114,46 @@ export default function AlertHistory({ alerts }: AlertHistoryProps) {
                   >
                     {isResolved ? "Resolved" : "Active"}
                   </span>
+                </td>
+                <td className="alert-table-td" style={{ textAlign: "center" }}>
+                  {alert.rootCauseHint ? (
+                    <span style={{ display: "inline-flex", gap: 4 }}>
+                      <button
+                        onClick={() => onFeedback?.(alert.id, "useful")}
+                        disabled={alert.feedback !== null}
+                        title="Helpful"
+                        style={{
+                          background: alert.feedback === "useful" ? "var(--signal-healthy-dim)" : "transparent",
+                          border: alert.feedback === "useful" ? "1px solid var(--signal-healthy)" : "1px solid var(--border)",
+                          borderRadius: "var(--radius-sm)",
+                          cursor: alert.feedback ? "default" : "pointer",
+                          padding: "2px 6px",
+                          fontSize: "0.85rem",
+                          opacity: alert.feedback && alert.feedback !== "useful" ? 0.3 : 1,
+                        }}
+                      >
+                        👍
+                      </button>
+                      <button
+                        onClick={() => onFeedback?.(alert.id, "not_useful")}
+                        disabled={alert.feedback !== null}
+                        title="Not helpful"
+                        style={{
+                          background: alert.feedback === "not_useful" ? "var(--signal-critical-dim)" : "transparent",
+                          border: alert.feedback === "not_useful" ? "1px solid var(--signal-critical)" : "1px solid var(--border)",
+                          borderRadius: "var(--radius-sm)",
+                          cursor: alert.feedback ? "default" : "pointer",
+                          padding: "2px 6px",
+                          fontSize: "0.85rem",
+                          opacity: alert.feedback && alert.feedback !== "not_useful" ? 0.3 : 1,
+                        }}
+                      >
+                        👎
+                      </button>
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
+                  )}
                 </td>
               </tr>
             );

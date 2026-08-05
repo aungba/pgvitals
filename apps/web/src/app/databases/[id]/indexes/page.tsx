@@ -9,8 +9,9 @@ import {
   dismissRecommendation,
   restoreRecommendation,
   triggerIndexAnalysis,
+  simulateIndex,
 } from "../../../lib/api";
-import type { Database, IndexRecommendation } from "../../../lib/api";
+import type { Database, IndexRecommendation, IndexSimulationResult } from "../../../lib/api";
 
 /* ===================================================================
    Index Advisor Page — Phase 5
@@ -35,6 +36,9 @@ export default function IndexAdvisorPage() {
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [simulating, setSimulating] = useState<string | null>(null);
+  const [simResults, setSimResults] = useState<Record<string, IndexSimulationResult>>({});
+  const [simQuery, setSimQuery] = useState<Record<string, string>>({});
 
   const fetchData = useCallback(async () => {
     try {
@@ -208,6 +212,24 @@ export default function IndexAdvisorPage() {
               onRestore={() => handleRestore(rec.id)}
               onCopy={(ddl) => handleCopy(ddl, rec.id)}
               copied={copiedId === rec.id}
+              dbId={id}
+              simulating={simulating === rec.id}
+              simResult={simResults[rec.id]}
+              simQuery={simQuery[rec.id] ?? ""}
+              onSimQueryChange={(val) => setSimQuery((prev) => ({ ...prev, [rec.id]: val }))}
+              onSimulate={async () => {
+                const query = simQuery[rec.id];
+                if (!query?.trim() || !rec.suggestedDdl) return;
+                setSimulating(rec.id);
+                try {
+                  const result = await simulateIndex(id, rec.suggestedDdl, query);
+                  setSimResults((prev) => ({ ...prev, [rec.id]: result }));
+                } catch {
+                  // Could show error inline
+                } finally {
+                  setSimulating(null);
+                }
+              }}
             />
           ))}
         </div>
@@ -237,12 +259,18 @@ function SummaryCard({ icon, label, count, color, description }: {
 
 /* ----- Recommendation Card ----- */
 
-function RecommendationCard({ rec, onDismiss, onRestore, onCopy, copied }: {
+function RecommendationCard({ rec, onDismiss, onRestore, onCopy, copied, dbId, simulating, simResult, simQuery, onSimQueryChange, onSimulate }: {
   rec: IndexRecommendation;
   onDismiss: () => void;
   onRestore: () => void;
   onCopy: (ddl: string) => void;
   copied: boolean;
+  dbId: string;
+  simulating: boolean;
+  simResult?: IndexSimulationResult;
+  simQuery: string;
+  onSimQueryChange: (val: string) => void;
+  onSimulate: () => void;
 }) {
   const isUnused = rec.recommendationType === "unused";
   const borderColor = isUnused ? "var(--signal-warning)" : "var(--signal-critical)";
@@ -361,6 +389,76 @@ function RecommendationCard({ rec, onDismiss, onRestore, onCopy, copied }: {
           >
             {copied ? "✓ Copied" : "Copy"}
           </button>
+        </div>
+      )}
+
+      {/* HypoPG Simulation — only for missing indexes with DDL */}
+      {!isUnused && rec.suggestedDdl && !rec.dismissed && (
+        <div style={{
+          marginTop: "var(--space-md)",
+          padding: "var(--space-md)",
+          background: "var(--surface)",
+          borderRadius: "var(--radius-md)",
+          border: "1px solid var(--border)",
+        }}>
+          <div style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: 8, color: "var(--text-secondary)" }}>
+            🧪 HypoPG Simulation
+          </div>
+          {simResult ? (
+            <div style={{ display: "flex", gap: "var(--space-lg)", flexWrap: "wrap", alignItems: "center" }}>
+              <MetaStat label="Cost Before" value={simResult.costBefore.toLocaleString()} />
+              <span style={{ fontSize: "1.2rem", color: "var(--text-muted)" }}>→</span>
+              <MetaStat label="Cost After" value={simResult.costAfter.toLocaleString()} />
+              <div>
+                <div style={{ color: "var(--text-muted)", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Reduction</div>
+                <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, color: simResult.costReductionPct > 50 ? "var(--signal-healthy)" : "var(--signal-warning)", fontSize: "1.1rem" }}>
+                  {simResult.costReductionPct}%
+                </div>
+              </div>
+              <MetaStat label="Plan Change" value={`${simResult.planBefore} → ${simResult.planAfter}`} />
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <input
+                  type="text"
+                  placeholder="Paste a SELECT query that hits this table…"
+                  value={simQuery}
+                  onChange={(e) => onSimQueryChange(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: "8px 12px",
+                    background: "var(--bg)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-sm)",
+                    color: "var(--text-primary)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "0.8rem",
+                  }}
+                />
+                <button
+                  onClick={onSimulate}
+                  disabled={!simQuery.trim() || simulating}
+                  style={{
+                    padding: "8px 16px",
+                    background: simQuery.trim() && !simulating ? "var(--brand)" : "var(--surface)",
+                    color: simQuery.trim() && !simulating ? "#fff" : "var(--text-muted)",
+                    border: "none",
+                    borderRadius: "var(--radius-sm)",
+                    cursor: simQuery.trim() && !simulating ? "pointer" : "not-allowed",
+                    fontWeight: 600,
+                    fontSize: "0.8rem",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {simulating ? "Simulating…" : "🧪 Simulate"}
+                </button>
+              </div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                Requires the HypoPG extension installed on your database
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

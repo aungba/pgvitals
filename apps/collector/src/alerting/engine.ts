@@ -6,6 +6,7 @@ import type { GeneratedHint } from "../collector/rules-engine.js";
 import { generateFingerprint, hintToAlertType } from "./fingerprint.js";
 import { sendSlackAlert, type AlertPayload } from "./notifier.js";
 import { sendEmailAlert, type EmailConfig } from "./email-notifier.js";
+import { sendWebhookAlert, sendPagerDutyAlert, sendTeamsAlert } from "./webhook-notifier.js";
 import { config } from "../config.js";
 
 /* ===================================================================
@@ -15,6 +16,9 @@ import { config } from "../config.js";
 interface ChannelsConfig {
   slack?: { webhookUrl: string };
   email?: EmailConfig;
+  webhook?: { url: string; secret?: string };
+  pagerduty?: { routingKey: string };
+  teams?: { webhookUrl: string };
 }
 
 /**
@@ -182,6 +186,21 @@ async function dispatchNotification(
   // Email
   if (channels?.email?.smtpHost && channels.email.toAddresses?.length > 0) {
     await sendEmailAlert(channels.email, payload, log);
+  }
+
+  // Generic Webhook
+  if (channels?.webhook?.url) {
+    await sendWebhookAlert(channels.webhook.url, payload, log, channels.webhook.secret);
+  }
+
+  // PagerDuty
+  if (channels?.pagerduty?.routingKey) {
+    await sendPagerDutyAlert(channels.pagerduty.routingKey, payload, log);
+  }
+
+  // Microsoft Teams
+  if (channels?.teams?.webhookUrl) {
+    await sendTeamsAlert(channels.teams.webhookUrl, payload, log);
   }
 }
 

@@ -10,6 +10,7 @@ import {
   getHints,
   getActiveAlerts,
   deleteDatabase,
+  getSchemaEvents,
 } from "../../lib/api";
 import type {
   Database,
@@ -18,6 +19,7 @@ import type {
   Snapshot,
   Hint,
   Alert,
+  SchemaEvent,
 } from "../../lib/api";
 import ConnectionGauge from "../../components/ConnectionGauge";
 import ConnectionChart from "../../components/ConnectionChart";
@@ -56,6 +58,7 @@ export default function DatabaseDetailPage() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [hints, setHints] = useState<Hint[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<Alert[]>([]);
+  const [schemaEvents, setSchemaEvents] = useState<SchemaEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -79,13 +82,14 @@ export default function DatabaseDetailPage() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [db, ov, sess, snaps, hnts, als] = await Promise.all([
+      const [db, ov, sess, snaps, hnts, als, schEvt] = await Promise.all([
         getDatabase(id),
         getOverview(id),
         getSessions(id),
         getSnapshots(id, 100),
         getHints(id),
         getActiveAlerts(id),
+        getSchemaEvents(id).catch(() => ({ events: [] as SchemaEvent[] })),
       ]);
       setDatabase(db);
       setOverview(ov);
@@ -93,6 +97,7 @@ export default function DatabaseDetailPage() {
       setSnapshots(snaps);
       setHints(hnts);
       setActiveAlerts(als);
+      setSchemaEvents(schEvt.events);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch data");
@@ -597,7 +602,7 @@ export default function DatabaseDetailPage() {
       {/* ---------- Connection Chart ---------- */}
       <div className="chart-section">
         <div className="section-title">Connection History</div>
-        <ConnectionChart snapshots={snapshots} />
+        <ConnectionChart snapshots={snapshots} schemaEvents={schemaEvents} />
       </div>
 
       {/* ---------- Session Grouping ---------- */}

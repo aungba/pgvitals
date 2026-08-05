@@ -198,6 +198,8 @@ export interface Alert {
   firedAt: string;
   resolvedAt: string | null;
   lastNotifiedAt: string | null;
+  feedback: "useful" | "not_useful" | null;
+  feedbackAt: string | null;
 }
 
 export interface AlertRule {
@@ -894,5 +896,44 @@ export async function getPoolerHistory(
   return request<{ history: PoolerSnapshot[] }>(
     `/api/databases/${dbId}/pooler/history`,
     { token },
+  );
+}
+
+/* ---------- Alert Feedback (§11) ---------- */
+
+export async function submitAlertFeedback(
+  alertId: string,
+  feedback: "useful" | "not_useful",
+  token?: string,
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/alerts/${alertId}/feedback`, {
+    method: "PATCH",
+    body: JSON.stringify({ feedback }),
+    token,
+  });
+}
+
+/* ---------- HypoPG Index Simulation (§2.4) ---------- */
+
+export interface IndexSimulationResult {
+  indexDdl: string;
+  tableName: string;
+  testQuery: string;
+  costBefore: number;
+  costAfter: number;
+  costReductionPct: number;
+  planBefore: string;
+  planAfter: string;
+}
+
+export async function simulateIndex(
+  dbId: string,
+  indexDdl: string,
+  testQuery: string,
+  token?: string,
+): Promise<IndexSimulationResult> {
+  return request<IndexSimulationResult>(
+    `/api/databases/${dbId}/indexes/simulate`,
+    { method: "POST", body: JSON.stringify({ indexDdl, testQuery }), token },
   );
 }

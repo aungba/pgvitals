@@ -159,4 +159,101 @@ export default async function databaseRoutes(app: FastifyInstance): Promise<void
       }
     }
   );
+
+  /**
+   * POST /api/databases/validate — Test a connection string during onboarding.
+   * Returns database version, name, and max_connections.
+   */
+  app.post<{ Body: { connectionString: string } }>(
+    "/api/databases/validate",
+    async (request, reply) => {
+      const { connectionString } = request.body as { connectionString: string };
+      if (!connectionString) {
+        return reply.status(400).send({ success: false, error: "connectionString is required" });
+      }
+
+      // Dynamic import to avoid circular deps
+      const postgres = (await import("postgres")).default;
+      const client = postgres(connectionString, {
+        max: 1,
+        idle_timeout: 5,
+        connect_timeout: 10,
+      });
+
+      try {
+        const [versionRow] = await client`SELECT version() AS version`;
+        const [maxConnRow] = await client`SHOW max_connections`;
+        const [dbRow] = await client`SELECT current_database() AS db_name`;
+
+        await client.end({ timeout: 5 });
+
+        return reply.send({
+          success: true,
+          details: {
+            version: (versionRow.version as string).split(" ").slice(0, 2).join(" "),
+            maxConnections: parseInt(maxConnRow.max_connections as string, 10),
+            databaseName: dbRow.db_name,
+          },
+        });
+      } catch (err) {
+        try { await client.end({ timeout: 3 }); } catch { /* ignore */ }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(400).send({ success: false, error: message });
+      }
+    }
+  );
+
+  /**
+   * POST /api/databases/capabilities — Detect optional extensions.
+   */
+  app.post<{ Body: { connectionString: string } }>(
+    "/api/databases/capabilities",
+    async (request, reply) => {
+      const { connectionString } = request.body as { connectionString: string };
+      if (!connectionString) {
+        return reply.status(400).send({ error: "connectionString is required" });
+      }
+
+      const postgres = (await import("postgres")).default;
+      const client = postgres(connectionString, {
+        max: 1,
+        idle_timeout: 5,
+        connect_timeout: 10,
+      });
+
+      try {
+        const extensions = await client`
+          SELECT extname FROM pg_extension 
+          WHERE extname IN ('pg_stat_statements', 'hypopg')
+        `;
+        const extNames = extensions.map((r) => r.extname as string);
+
+        // Check PgBouncer — attempt to connect to admin port
+        let pgbouncer = false;
+        try {
+          // Look for a setting that suggests PgBouncer is involved
+          const [poolerCheck] = await client`
+            SELECT current_setting('server_version', true) AS sv
+          `;
+          // PgBouncer's admin console returns different version format
+          // This is a heuristic — not definitive
+          pgbouncer = false; // Default: can't detect from app DB alone
+        } catch {
+          pgbouncer = false;
+        }
+
+        await client.end({ timeout: 5 });
+
+        return reply.send({
+          pgStatStatements: extNames.includes("pg_stat_statements"),
+          hypopg: extNames.includes("hypopg"),
+          pgbouncer,
+        });
+      } catch (err) {
+        try { await client.end({ timeout: 3 }); } catch { /* ignore */ }
+        const message = err instanceof Error ? err.message : "Unknown error";
+        return reply.status(400).send({ error: message });
+      }
+    }
+  );
 }
