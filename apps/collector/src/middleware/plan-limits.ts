@@ -32,10 +32,10 @@ const PLAN_LIMITS: Record<string, PlanLimits> = {
     maxDatabases: Infinity,
     alertingEnabled: true,
     queryPerformanceEnabled: true,
-    indexAdvisorEnabled: false,    // Team-only per spec v3 pricing
-    vacuumAdvisorEnabled: false,   // Team-only per spec v3 pricing
-    replicationEnabled: false,     // Team-only per spec v3 pricing
-    logInsightsEnabled: false,     // Team-only per spec v3 pricing
+    indexAdvisorEnabled: true,
+    vacuumAdvisorEnabled: true,
+    replicationEnabled: true,
+    logInsightsEnabled: true,
     retentionDays: 30,
   },
   team: {
