@@ -11,7 +11,7 @@
 1. [Architecture Overview](#1-architecture-overview)
 2. [Provision the VM](#2-provision-the-vm)
 3. [Initial Server Setup](#3-initial-server-setup)
-4. [Install Docker & Docker Compose](#4-install-docker--docker-compose)
+4. [Install Docker & Docker Compose](#4-install-docker--docker-compose) *(skip if bare metal)*
 5. [Install Node.js & pnpm](#5-install-nodejs--pnpm)
 6. [Clone the Repository](#6-clone-the-repository)
 7. [Generate Secrets](#7-generate-secrets)
@@ -30,6 +30,9 @@
 20. [Updating PG Vitals](#20-updating-pg-vitals)
 21. [Troubleshooting](#21-troubleshooting)
 
+> [!NOTE]
+> This guide offers two infrastructure paths: **Docker** (easier setup) or **Bare Metal** (better performance, no Docker dependency). Choose one — the rest of the guide works the same either way.
+
 ---
 
 ## 1. Architecture Overview
@@ -47,25 +50,25 @@ Internet
    :3000    :3001
 ┌────────┐ ┌──────────┐     ┌──────────────────┐
 │ Next.js│ │ Collector│────▶│  TimescaleDB     │
-│  (Web) │ │ (Fastify)│     │  (Docker :5432)  │
+│  (Web) │ │ (Fastify)│     │  (port 5432)     │
 └────────┘ │          │────▶│                  │
            └──────────┘     └──────────────────┘
                 │
                 ▼
            ┌──────────┐
            │  Redis   │
-           │ (Docker  │
-           │  :6379)  │
+           │ (port    │
+           │  6379)   │
            └──────────┘
 ```
 
-| Component | Runs As | Port |
-|-----------|---------|------|
-| TimescaleDB | Docker container | 5432 (localhost only) |
-| Redis | Docker container | 6379 (localhost only) |
-| Collector API | PM2 managed Node.js process | 3001 (localhost only) |
-| Web Dashboard | PM2 managed Node.js process | 3000 (localhost only) |
-| Nginx | System service | 80/443 (public) |
+| Component | Docker Path | Bare Metal Path | Port |
+|-----------|-------------|-----------------|------|
+| TimescaleDB | Docker container | System service (`postgresql`) | 5432 (localhost only) |
+| Redis | Docker container | System service (`redis-server`) | 6379 (localhost only) |
+| Collector API | PM2 managed Node.js | PM2 managed Node.js | 3001 (localhost only) |
+| Web Dashboard | PM2 managed Node.js | PM2 managed Node.js | 3000 (localhost only) |
+| Nginx | System service | System service | 80/443 (public) |
 
 ---
 
@@ -101,7 +104,6 @@ sudo apt install -y curl wget git build-essential ca-certificates gnupg lsb-rele
 # Create a dedicated user (optional but recommended)
 sudo adduser pgvitals --disabled-password --gecos ""
 sudo usermod -aG sudo pgvitals
-sudo usermod -aG docker pgvitals
 
 # Set timezone
 sudo timedatectl set-timezone UTC
@@ -113,6 +115,9 @@ sudo timedatectl set-timezone UTC
 ---
 
 ## 4. Install Docker & Docker Compose
+
+> [!TIP]
+> **Bare metal path?** Skip this entire section and go directly to [Step 5](#5-install-nodejs--pnpm).
 
 ```bash
 # Add Docker's official GPG key
@@ -261,7 +266,11 @@ cp .env packages/db/.env
 
 ## 9. Start Infrastructure (TimescaleDB + Redis)
 
-Create a production Docker Compose file for just the infrastructure services:
+Choose **one** of the two options below.
+
+### Option A: Docker (recommended for quick setup)
+
+Create a production Docker Compose file:
 
 ```bash
 cat > /opt/pgvitals/docker-compose.prod.yml << 'EOF'
@@ -335,8 +344,160 @@ pgvitals-timescaledb    running (healthy)        127.0.0.1:5432->5432/tcp
 pgvitals-redis          running (healthy)        127.0.0.1:6379->6379/tcp
 ```
 
+> **Done — skip to [Step 10](#10-run-database-migrations).**
+
+---
+
+### Option B: Bare Metal (no Docker)
+
+#### 9B.1 Install TimescaleDB
+
+```bash
+# Add PostgreSQL 16 repository
+sudo apt install -y gnupg postgresql-common apt-transport-https
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+
+# Add TimescaleDB repository
+echo "deb https://packagecloud.io/timescale/timescaledb/ubuntu/ $(lsb_release -cs) main" | \
+  sudo tee /etc/apt/sources.list.d/timescaledb.list
+curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey | \
+  sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/timescaledb.gpg
+
+# Install TimescaleDB for PostgreSQL 16
+sudo apt update
+sudo apt install -y timescaledb-2-postgresql-16
+
+# Run the TimescaleDB tuner (auto-configures postgresql.conf)
+sudo timescaledb-tune --yes --quiet
+
+# Restart PostgreSQL to apply config
+sudo systemctl restart postgresql
+sudo systemctl enable postgresql
+```
+
+#### 9B.2 Create the PG Vitals Database & User
+
+```bash
+# Switch to postgres user and create the database
+sudo -u postgres psql << 'SQL'
+-- Create the pgvitals user with a strong password
+CREATE USER pgvitals WITH PASSWORD 'YOUR_POSTGRES_PASSWORD';
+
+-- Create the database
+CREATE DATABASE pgvitals OWNER pgvitals;
+
+-- Connect to it and enable TimescaleDB
+\c pgvitals
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+-- Grant full privileges to the pgvitals user
+GRANT ALL PRIVILEGES ON DATABASE pgvitals TO pgvitals;
+GRANT ALL PRIVILEGES ON SCHEMA public TO pgvitals;
+SQL
+```
+
+#### 9B.3 Harden PostgreSQL
+
+Edit `/etc/postgresql/16/main/postgresql.conf`:
+
+```bash
+sudo nano /etc/postgresql/16/main/postgresql.conf
+```
+
+Key settings to verify/change:
+
+```ini
+# Listen only on localhost (default — verify it's set)
+listen_addresses = 'localhost'
+
+# Performance tuning (timescaledb-tune should have set these)
+shared_buffers = 1GB              # 25% of RAM
+effective_cache_size = 3GB        # 75% of RAM
+work_mem = 32MB
+maintenance_work_mem = 256MB
+```
+
+Edit `/etc/postgresql/16/main/pg_hba.conf` to use password auth:
+
+```bash
+sudo nano /etc/postgresql/16/main/pg_hba.conf
+```
+
+Ensure this line exists for local TCP connections:
+
+```
+# TYPE  DATABASE  USER      ADDRESS       METHOD
+host    pgvitals  pgvitals  127.0.0.1/32  scram-sha-256
+```
+
+Restart PostgreSQL:
+
+```bash
+sudo systemctl restart postgresql
+```
+
+Verify the connection:
+
+```bash
+psql "postgresql://pgvitals:YOUR_POSTGRES_PASSWORD@localhost:5432/pgvitals" -c "SELECT extname FROM pg_extension WHERE extname = 'timescaledb';"
+```
+
+Expected output:
+```
+   extname
+-------------
+ timescaledb
+```
+
+#### 9B.4 Install Redis
+
+```bash
+# Install Redis from official Ubuntu repos
+sudo apt install -y redis-server
+
+# Configure Redis
+sudo nano /etc/redis/redis.conf
+```
+
+Set these values in `redis.conf`:
+
+```ini
+# Bind to localhost only
+bind 127.0.0.1 ::1
+
+# Set a password
+requirepass YOUR_REDIS_PASSWORD
+
+# Memory limit
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+
+# Persistence (RDB snapshots)
+save 900 1
+save 300 10
+save 60 10000
+
+# Run as a daemon
+daemonize yes
+supervised systemd
+```
+
+Restart and enable Redis:
+
+```bash
+sudo systemctl restart redis-server
+sudo systemctl enable redis-server
+```
+
+Verify Redis:
+
+```bash
+redis-cli -a YOUR_REDIS_PASSWORD ping
+# Expected: PONG
+```
+
 > [!IMPORTANT]
-> Ports are bound to `127.0.0.1` only — they are NOT publicly accessible. Only the Nginx reverse proxy will be exposed.
+> Both TimescaleDB and Redis are bound to `127.0.0.1` — they are NOT accessible from the internet. Only the Nginx reverse proxy will be publicly exposed.
 
 ---
 
@@ -625,8 +786,11 @@ To                         Action      From
 Run these checks to confirm everything is working:
 
 ```bash
-# 1. Check Docker containers
+# 1. Check infrastructure
+# Docker path:
 docker compose -f /opt/pgvitals/docker-compose.prod.yml ps
+# Bare metal path:
+sudo systemctl status postgresql redis-server
 
 # 2. Check PM2 processes
 pm2 status
@@ -661,7 +825,7 @@ sudo mkdir -p /opt/pgvitals-backups
 sudo chown $USER:$USER /opt/pgvitals-backups
 
 # Create backup script
-cat > /opt/pgvitals/backup.sh << 'EOF'
+cat > /opt/pgvitals/backup.sh << 'SCRIPT'
 #!/bin/bash
 set -euo pipefail
 
@@ -670,14 +834,20 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/pgvitals_${TIMESTAMP}.sql.gz"
 KEEP_DAYS=14
 
-# Dump TimescaleDB via Docker
-docker exec pgvitals-timescaledb pg_dump -U pgvitals pgvitals | gzip > "$BACKUP_FILE"
+# Dump TimescaleDB
+# Docker path:
+if command -v docker &> /dev/null && docker ps --format '{{.Names}}' | grep -q pgvitals-timescaledb; then
+    docker exec pgvitals-timescaledb pg_dump -U pgvitals pgvitals | gzip > "$BACKUP_FILE"
+else
+    # Bare metal path:
+    sudo -u postgres pg_dump pgvitals | gzip > "$BACKUP_FILE"
+fi
 
 # Remove backups older than $KEEP_DAYS days
 find "$BACKUP_DIR" -name "pgvitals_*.sql.gz" -mtime +${KEEP_DAYS} -delete
 
 echo "[$(date)] Backup created: $BACKUP_FILE ($(du -sh $BACKUP_FILE | cut -f1))"
-EOF
+SCRIPT
 
 chmod +x /opt/pgvitals/backup.sh
 
@@ -694,9 +864,13 @@ chmod +x /opt/pgvitals/backup.sh
 # Stop the collector first
 pm2 stop pgvitals-collector
 
-# Restore
+# Docker path:
 gunzip -c /opt/pgvitals-backups/pgvitals_20260805_020000.sql.gz | \
   docker exec -i pgvitals-timescaledb psql -U pgvitals -d pgvitals
+
+# Bare metal path:
+gunzip -c /opt/pgvitals-backups/pgvitals_20260805_020000.sql.gz | \
+  sudo -u postgres psql -d pgvitals
 
 # Restart collector
 pm2 start pgvitals-collector
@@ -767,8 +941,10 @@ pm2 status
 |---------|-----------|-----|
 | Collector won't start | `pm2 logs pgvitals-collector --lines 50` | Check `DATABASE_URL` and `REDIS_URL` in `.env` |
 | Web shows "API unavailable" | `curl http://localhost:3001/health` | Ensure collector is running and `NEXT_PUBLIC_API_URL` is correct |
-| Database connection refused | `docker ps` — check timescaledb status | `docker compose -f docker-compose.prod.yml restart timescaledb` |
-| Redis connection refused | `docker logs pgvitals-redis` | Check `REDIS_PASSWORD` matches in `.env` and `.env.docker` |
+| DB connection refused (Docker) | `docker ps` — check timescaledb status | `docker compose -f docker-compose.prod.yml restart timescaledb` |
+| DB connection refused (bare metal) | `sudo systemctl status postgresql` | `sudo systemctl restart postgresql` |
+| Redis connection refused (Docker) | `docker logs pgvitals-redis` | Check `REDIS_PASSWORD` matches in `.env` and `.env.docker` |
+| Redis connection refused (bare metal) | `sudo systemctl status redis-server` | Check password in `/etc/redis/redis.conf` matches `.env` |
 | Nginx 502 Bad Gateway | `pm2 status` — app may be down | Restart: `pm2 restart all` |
 | SSL certificate expired | `sudo certbot renew` | Check cron: `systemctl list-timers \| grep certbot` |
 | High memory usage | `pm2 monit` | PM2 auto-restarts at 512MB; check for leaks |
@@ -783,21 +959,23 @@ pm2 logs --lines 100
 # Monitor CPU/memory
 pm2 monit
 
-# Check Docker resource usage
-docker stats
-
 # Check disk usage
 df -h
 
-# Check TimescaleDB size
+# ---- Docker path ----
+docker stats
 docker exec pgvitals-timescaledb psql -U pgvitals -c "SELECT pg_size_pretty(pg_database_size('pgvitals'));"
-
-# Check Redis memory
 docker exec pgvitals-redis redis-cli -a YOUR_REDIS_PASSWORD INFO memory | grep used_memory_human
+
+# ---- Bare metal path ----
+sudo -u postgres psql -c "SELECT pg_size_pretty(pg_database_size('pgvitals'));"
+redis-cli -a YOUR_REDIS_PASSWORD INFO memory | grep used_memory_human
+sudo systemctl status postgresql redis-server
 
 # Restart everything
 pm2 restart all
-docker compose -f /opt/pgvitals/docker-compose.prod.yml restart
+# Docker: docker compose -f /opt/pgvitals/docker-compose.prod.yml restart
+# Bare metal: sudo systemctl restart postgresql redis-server
 ```
 
 ### Health Check Script
@@ -826,8 +1004,8 @@ FAILED=0
 echo "PG Vitals Health Check"
 echo "======================"
 
-check "TimescaleDB" "docker exec pgvitals-timescaledb pg_isready -U pgvitals"
-check "Redis" "docker exec pgvitals-redis redis-cli -a \$REDIS_PASSWORD ping"
+check "TimescaleDB" "pg_isready -h localhost -U pgvitals"
+check "Redis" "redis-cli -a \$REDIS_PASSWORD ping"
 check "Collector API" "curl -sf http://localhost:3001/health"
 check "Web Dashboard" "curl -sf -o /dev/null http://localhost:3000"
 check "Nginx" "sudo nginx -t"
@@ -854,8 +1032,10 @@ Project location:    /opt/pgvitals
 Logs:                /var/log/pgvitals/
 Backups:             /opt/pgvitals-backups/
 PM2 config:          /opt/pgvitals/ecosystem.config.cjs
-Docker Compose:      /opt/pgvitals/docker-compose.prod.yml
+Docker Compose:      /opt/pgvitals/docker-compose.prod.yml  (Docker path only)
 Nginx config:        /etc/nginx/sites-available/pgvitals
+PostgreSQL config:   /etc/postgresql/16/main/              (bare metal only)
+Redis config:        /etc/redis/redis.conf                 (bare metal only)
 Environment:         /opt/pgvitals/.env
 
 Start all:           pm2 start ecosystem.config.cjs
