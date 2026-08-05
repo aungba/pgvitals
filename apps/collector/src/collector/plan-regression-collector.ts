@@ -196,7 +196,7 @@ export async function collectPlanSnapshots(
       let explainResult: Array<{ "QUERY PLAN": PlanNode[] }> | undefined;
 
       if (paramCount > 0) {
-        // Use PREPARE + EXPLAIN (FORMAT JSON, GENERIC_PLAN) for parameterized queries
+        // Strategy 1: PREPARE + EXPLAIN (GENERIC_PLAN) — PG 16+
         const paramTypes = Array(paramCount).fill("unknown").join(", ");
         const stmtName = `pgv_plan_${query.queryid}`;
 
@@ -225,10 +225,21 @@ export async function collectPlanSnapshots(
             { timeoutMs: 3000 }
           ).catch(() => {});
         } catch {
-          // GENERIC_PLAN not available (PG < 16) or query can't be prepared
-          // Fall back: skip this query
-          log.debug({ queryid: query.queryid }, "EXPLAIN with GENERIC_PLAN failed, skipping");
-          continue;
+          // Strategy 2: Replace $N with NULL — works on all PG versions.
+          // This gives approximate plan shape (NULLs may produce different
+          // cost estimates, but the node types / plan shape will be correct
+          // in most cases, which is sufficient for regression detection).
+          try {
+            const nullQuery = query.queryText.replace(/\$\d+/g, "NULL");
+            explainResult = await safeQuery<Array<{ "QUERY PLAN": PlanNode[] }>>(
+              connectionString,
+              `EXPLAIN (FORMAT JSON) ${nullQuery}`,
+              { timeoutMs: 10000 }
+            );
+          } catch {
+            log.debug({ queryid: query.queryid }, "EXPLAIN with NULL substitution also failed, skipping");
+            continue;
+          }
         }
       } else {
         // No parameters — EXPLAIN directly
