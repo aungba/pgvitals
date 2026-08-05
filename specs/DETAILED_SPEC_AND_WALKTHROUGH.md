@@ -1,7 +1,7 @@
 # PG Vitals — Detailed Technical Specification & Codebase Walkthrough
 
-> **Version:** 0.3.0 | **Last Updated:** 2026-08-05
-> **Status:** All 10 product phases implemented (backend + frontend). Auth (Clerk) and Billing (Stripe) require external accounts.
+> **Version:** 0.4.0 | **Last Updated:** 2026-08-05
+> **Status:** All 10 product phases implemented (backend + frontend). 5 missing features added (alert feedback, HypoPG simulation, schema markers, webhook notifiers, onboarding wizard). Test suite added (80 tests). Auth (Clerk) and Billing (Stripe) require external accounts.
 
 ---
 
@@ -57,7 +57,7 @@ Unlike pganalyze, pgHero, or Datadog, PG Vitals correlates **database-level symp
 │  (apps/collector)           │  Port 3001
 │  ├─ Connection Collector    │  → pg_stat_activity + pg_locks
 │  ├─ Rules Engine            │  → heuristic root-cause hints
-│  ├─ Alerting Engine         │  → dedup, cooldown, Slack + Email notify
+│  ├─ Alerting Engine         │  → dedup, cooldown, Slack + Email + PagerDuty + Teams + Webhook notify
 │  ├─ Query Stats Collector   │  → pg_stat_statements
 │  ├─ Index Advisor           │  → unused/missing index detection
 │  ├─ Vacuum Health Collector │  → pg_stat_user_tables, pg_stat_database
@@ -104,6 +104,9 @@ Unlike pganalyze, pgHero, or Datadog, PG Vitals correlates **database-level symp
 | Web → Collector | `fetch()` over HTTP | REST JSON |
 | Collector → Slack | `fetch()` | Webhook POST |
 | Collector → Email (SMTP) | `nodemailer` | SMTP/TLS |
+| Collector → PagerDuty | `fetch()` | Events API v2 POST |
+| Collector → Teams | `fetch()` | Adaptive Cards webhook POST |
+| Collector → Generic Webhook | `fetch()` | JSON POST + HMAC-SHA256 signature |
 
 ---
 
@@ -144,12 +147,14 @@ pgvitals/
 │   │   │   │   ├── plan-regression-collector.ts # EXPLAIN plan shape tracking
 │   │   │   │   ├── pooler-collector.ts       # PgBouncer SHOW POOLS metrics
 │   │   │   │   ├── schema-diff-collector.ts  # DDL change detection via diffing
+│   │   │   │   ├── hypopg-simulator.ts       # HypoPG hypothetical index simulation
 │   │   │   │   └── retention.ts      # Tier-based data purge
 │   │   │   ├── alerting/
 │   │   │   │   ├── engine.ts         # Alert evaluation, dedup, fire/resolve
 │   │   │   │   ├── fingerprint.ts    # Alert deduplication fingerprints
 │   │   │   │   ├── notifier.ts       # Slack webhook sender
-│   │   │   │   └── email-notifier.ts # Email SMTP sender (Nodemailer)
+│   │   │   │   ├── email-notifier.ts # Email SMTP sender (Nodemailer)
+│   │   │   │   └── webhook-notifier.ts # PagerDuty, Teams, generic webhook senders
 │   │   │   ├── middleware/
 │   │   │   │   ├── auth.ts           # Clerk JWT verification + dev fallback
 │   │   │   │   └── plan-limits.ts    # Plan-based feature gating
@@ -158,6 +163,12 @@ pgvitals/
 │   │   │       ├── safe-query.ts     # Read-only SQL execution safety net
 │   │   │       ├── redact-query.ts   # Query text literal redaction (PII)
 │   │   │       └── cost-model.ts     # Cost-per-query USD estimation
+│   │   ├── tests/                    # Vitest unit tests (80 tests, 5 suites)
+│   │   │   ├── encryption.test.ts
+│   │   │   ├── redact-query.test.ts
+│   │   │   ├── cost-model.test.ts
+│   │   │   ├── fingerprint.test.ts
+│   │   │   └── safe-query.test.ts
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
@@ -186,9 +197,15 @@ pgvitals/
 │       │           ├── page.tsx         # Database detail dashboard
 │       │           ├── alerts/page.tsx  # Alert rules + history
 │       │           ├── queries/page.tsx # Query performance + EXPLAIN
-│       │           ├── indexes/page.tsx # Index recommendations
+│       │           ├── indexes/page.tsx # Index recommendations + HypoPG simulation
 │       │           ├── health/page.tsx  # Vacuum & DB health
-│       │           └── logs/page.tsx    # Log insights — errors, deadlocks
+│       │           ├── logs/page.tsx    # Log insights — errors, deadlocks
+│       │           ├── costs/page.tsx   # Query cost estimator dashboard
+│       │           ├── plans/page.tsx   # Plan regression detection timeline
+│       │           ├── pooler/page.tsx  # PgBouncer pool stats dashboard
+│       │           └── schema/page.tsx  # Schema change event log
+│       │   ├── onboarding/
+│       │   │   └── page.tsx            # 7-step onboarding wizard
 │       │   └── settings/
 │       │       ├── billing/page.tsx     # Billing management
 │       │       └── team/page.tsx        # Organization & team settings
@@ -226,6 +243,7 @@ pgvitals/
 │   └── light_mode.txt
 │
 ├── docker-compose.yml      # Local dev: TimescaleDB + Redis
+├── vitest.config.ts        # Vitest test configuration
 ├── package.json            # Workspace root scripts
 ├── pnpm-workspace.yaml     # pnpm workspace config
 ├── tsconfig.base.json      # Shared TypeScript config
@@ -259,7 +277,8 @@ pgvitals/
 | **Time-series DB** | TimescaleDB | latest-pg16 | Application data storage (hypertables) |
 | **Frontend** | Next.js | 15 | React framework + App Router |
 | **Styling** | Vanilla CSS | — | Custom design system with CSS variables |
-| **Charts** | Custom SVG | — | Hand-rolled SVG gauges and charts |
+| **Charts** | Recharts | 2.x | Area charts, reference lines, tooltips + custom SVG gauges |
+| **Testing** | Vitest | 4.1 | Unit test framework (80 tests across 5 suites) |
 | **Logging** | Pino | 9.6 | Structured JSON logging |
 | **Encryption** | Node crypto | built-in | AES-256-GCM for connection strings |
 
@@ -388,6 +407,7 @@ erDiagram
 | `0009_log_insights.sql` | Log insights + error stats tables |
 | `0010_spec_sync_gaps.sql` | Replication lag + monitoring failure alert types, bloat estimation columns |
 | `0011_phase_8_10_features.sql` | Schema events, query plan snapshots, pooler snapshots, PgBouncer connection field, pool exhaustion alert type |
+| `0012_alert_feedback.sql` | Alert feedback columns (feedback enum + feedback_at timestamp) |
 
 The `migrate.ts` script runs Drizzle migrations **then** creates TimescaleDB hypertables idempotently via raw SQL.
 
@@ -538,6 +558,27 @@ Generates unique strings per alert type:
 - Test email feature with 🧪 brand-colored header (`#6366F1`)
 - Supports any SMTP server (Gmail, AWS SES, company SMTP, etc.)
 
+#### Webhook Notifier (`src/alerting/webhook-notifier.ts`)
+
+3 additional notification channels:
+
+**Generic Webhook:**
+- Sends JSON POST to any HTTP endpoint
+- Optional HMAC-SHA256 signature via `X-PgVitals-Signature: sha256=<hex>` header
+- Retries once on 5xx responses
+- User-Agent: `PgVitals-Alert/1.0`
+
+**PagerDuty:**
+- Posts to PagerDuty Events API v2 (`events.pagerduty.com/v2/enqueue`)
+- Maps alert severity to PagerDuty severity (critical/warning/error/info)
+- Sets `routing_key`, `dedup_key` (from alert fingerprint), `source`, `component`
+- Sends `resolve` events when alerts are resolved
+
+**Microsoft Teams:**
+- Posts Adaptive Cards to Teams Incoming Webhook connector
+- Color-coded severity header (red for critical, orange for warning)
+- Includes: alert type, database name, environment, root-cause hint, timestamp
+
 ### 6.7 Query Stats Collector
 
 **File:** `src/collector/query-stats-collector.ts`
@@ -580,6 +621,22 @@ Two detection modes:
 - Impact rating based on sequential scan count
 
 Both modes clear previous un-dismissed recommendations before regenerating.
+
+### 6.10a HypoPG Index Simulator
+
+**File:** `src/collector/hypopg-simulator.ts`
+
+Allows users to simulate hypothetical indexes using the HypoPG extension (opt-in):
+
+1. Checks if HypoPG extension is installed (`SELECT * FROM hypopg()`)
+2. Creates a session-scoped hypothetical index via `SELECT hypopg_create_index(ddl)`
+3. Runs `EXPLAIN (FORMAT JSON)` on a user-provided test query before and after
+4. Compares plan costs and node types (e.g., Seq Scan → Index Scan)
+5. Cleans up via `SELECT hypopg_reset()`
+6. Returns: `costBefore`, `costAfter`, `costReductionPct`, `planBefore`, `planAfter`, `usesIndex`
+7. All operations use a single connection (HypoPG indexes are session-scoped)
+
+Exposed via `POST /api/databases/:id/indexes/simulate` with `{ indexDdl, testQuery }` body.
 
 ### 6.10 Vacuum Health Collector
 
@@ -728,12 +785,17 @@ Detects DDL changes (CREATE/DROP table/column/index) via periodic schema diffing
 |-------|------|-------------|
 | `/` | `page.tsx` | Dashboard home — grid of monitored databases with connection gauges |
 | `/databases/new` | `databases/new/page.tsx` | Form to register a new database (name, connection string, environment) |
-| `/databases/[id]` | `databases/[id]/page.tsx` | Database detail — overview stats, connection chart, sessions table, hints |
-| `/databases/[id]/alerts` | `databases/[id]/alerts/page.tsx` | Alert rules configuration + alert history |
+| `/databases/[id]` | `databases/[id]/page.tsx` | Database detail — overview stats, connection chart (with schema change markers), sessions table, hints |
+| `/databases/[id]/alerts` | `databases/[id]/alerts/page.tsx` | Alert rules + history + feedback (thumbs up/down) + multi-channel config (Slack, Email, PagerDuty, Teams, Webhook) |
 | `/databases/[id]/queries` | `databases/[id]/queries/page.tsx` | Query performance — sortable table + EXPLAIN capture |
-| `/databases/[id]/indexes` | `databases/[id]/indexes/page.tsx` | Index recommendations — unused + missing, dismiss/restore |
+| `/databases/[id]/indexes` | `databases/[id]/indexes/page.tsx` | Index recommendations — unused + missing, dismiss/restore, HypoPG simulation |
 | `/databases/[id]/health` | `databases/[id]/health/page.tsx` | Vacuum stats + database health metrics |
 | `/databases/[id]/logs` | `databases/[id]/logs/page.tsx` | Log insights — errors, deadlocks, rollbacks |
+| `/databases/[id]/costs` | `databases/[id]/costs/page.tsx` | Query cost estimator — monthly IO+CPU cost per query |
+| `/databases/[id]/plans` | `databases/[id]/plans/page.tsx` | Plan regression timeline — shape hash diff + warning markers |
+| `/databases/[id]/pooler` | `databases/[id]/pooler/page.tsx` | PgBouncer pool stats — active/waiting clients, pool utilization |
+| `/databases/[id]/schema` | `databases/[id]/schema/page.tsx` | Schema change event log — DDL events with diffs |
+| `/onboarding` | `onboarding/page.tsx` | 7-step onboarding wizard (connection validation, capability detection, setup SQL, Slack config) |
 | `/settings/billing` | `settings/billing/page.tsx` | Billing/subscription management |
 | `/settings/team` | `settings/team/page.tsx` | Organization & team member management |
 
@@ -743,14 +805,14 @@ Detects DDL changes (CREATE/DROP table/column/index) via periodic schema diffing
 |-----------|---------|
 | `Sidebar` | Collapsible navigation sidebar — client component with localStorage-persisted collapse state |
 | `ConnectionGauge` | SVG radial gauge showing connection utilization % |
-| `ConnectionChart` | Time-series area chart for connection counts |
+| `ConnectionChart` | Recharts time-series area chart for connection counts + schema change markers (ReferenceLine) |
 | `SessionsTable` | Sortable, filterable table of active PostgreSQL sessions |
 | `SessionGroups` | Sessions grouped by application_name, usename, or state |
 | `HintCard` | Root-cause hint card with severity indicator |
 | `StatsCard` | Metric display card (value + label) |
 | `StatusBadge` | Environment badge (production/staging/development) |
 | `AlertBanner` | Active alert notification banner |
-| `AlertHistory` | Timeline of past alerts |
+| `AlertHistory` | Timeline of past alerts with thumbs up/down feedback buttons |
 | `ThemeToggle` | Dark/light mode toggle (persisted to `localStorage`) |
 
 ### 7.4 Collapsible Sidebar
@@ -797,6 +859,8 @@ Type-safe fetch wrapper with:
 | `POST` | `/api/databases` | Register a new database |
 | `GET` | `/api/databases/:id` | Get single database details |
 | `DELETE` | `/api/databases/:id` | Remove a database + all data |
+| `POST` | `/api/databases/validate` | Test a connection string (onboarding) — returns version, name, max_connections |
+| `POST` | `/api/databases/capabilities` | Detect extensions (pg_stat_statements, hypopg, pgbouncer) |
 
 ### Monitoring
 
@@ -818,6 +882,7 @@ Type-safe fetch wrapper with:
 | `PUT` | `/api/databases/:id/alert-rules/:ruleId` | Update specific rule |
 | `DELETE` | `/api/databases/:id/alert-rules/:ruleId` | Delete rule |
 | `POST` | `/api/databases/:id/alert-rules/test` | Send test notification (Slack and/or Email) |
+| `PATCH` | `/api/alerts/:id/feedback` | Submit alert feedback (`useful` or `not_useful`) |
 
 ### Query Performance
 
@@ -839,6 +904,7 @@ Type-safe fetch wrapper with:
 | `POST` | `/api/databases/:id/index-recommendations/:recId/dismiss` | Dismiss a recommendation |
 | `POST` | `/api/databases/:id/index-recommendations/:recId/restore` | Restore a dismissed recommendation |
 | `POST` | `/api/databases/:id/index-recommendations/analyze` | Trigger fresh analysis |
+| `POST` | `/api/databases/:id/indexes/simulate` | HypoPG simulation — compare EXPLAIN cost before/after hypothetical index |
 
 ### Vacuum & Health
 
@@ -1082,6 +1148,8 @@ pnpm dev                          # Start collector (3001) + web (3000)
 | `pnpm build` | All | Build all packages |
 | `pnpm lint` | All | Lint all packages |
 | `pnpm typecheck` | All | Type-check all packages |
+| `pnpm test` | All | Run Vitest test suite (80 tests) |
+| `pnpm test:watch` | All | Run Vitest in watch mode |
 
 ---
 
@@ -1091,32 +1159,37 @@ pnpm dev                          # Start collector (3001) + web (3000)
 |-------|-------------|---------|----------|--------|
 | 1 | Connection & Session Monitoring | ✅ Full | ✅ Full | **Complete** |
 | 1 | Root-Cause Hints (Rules Engine) | ✅ 5 rules | ✅ HintCard | **Complete** |
-| 2 | Alerting Engine | ✅ Dedup + cooldown + meta-alerting | ✅ Rules UI | **Complete** |
+| 2 | Alerting Engine | ✅ Dedup + cooldown + meta-alerting | ✅ Rules UI + feedback | **Complete** |
 | 2 | Slack Integration | ✅ Block Kit + dashboard link | ✅ Test button | **Complete** |
+| 2 | PagerDuty / Teams / Webhook | ✅ All 3 channels + HMAC signing | ✅ Config UI | **Complete** |
+| 2 | Alert Feedback | ✅ Schema + PATCH endpoint | ✅ Thumbs up/down in AlertHistory | **Complete** |
 | 3 | Auth (Clerk) | ❌ Not implemented | ❌ Not implemented | **Not started** |
 | 3 | Billing (Stripe) | ❌ Not implemented | ❌ Not implemented | **Not started** |
 | 3 | Multi-tenancy | ✅ Org CRUD + member invite/role/remove APIs | ✅ Team settings page + sidebar nav | **Complete** |
 | 4 | Query Performance (pg_stat_statements) | ✅ Full | ✅ Full | **Complete** |
 | 4 | EXPLAIN Capture | ✅ On-demand + warning parser | ✅ Full | **Complete** |
 | 4 | Query Trend Delta (week-over-week) | ✅ 7-day comparison | ✅ ↑/↓ badge per query | **Complete** |
-| 5 | Index Advisor | ✅ Unused + missing detection | ✅ Full | **Complete** |
+| 5 | Index Advisor | ✅ Unused + missing detection | ✅ Full + HypoPG simulation | **Complete** |
+| 5 | HypoPG Index Simulation | ✅ Session-scoped simulate endpoint | ✅ Inline UI on missing index cards | **Complete** |
 | 5 | Cache Hit Ratio Monitor | ✅ DB-level + per-table (`pg_statio_user_tables`) | ✅ Health page table + chart | **Complete** |
 | 6 | VACUUM/Bloat Advisor | ✅ Table bloat + health + per-table guidance | ✅ Full | **Complete** |
 | 6 | TX ID Wraparound Risk | ✅ `age(datfrozenxid)` tracking | ✅ Warning/critical badge + alert banner | **Complete** |
 | 6 | Table & Disk Growth Forecast | ✅ Daily size sampling + 7-day projection | ✅ Growth rate + days-to-limit table | **Complete** |
 | 7 | Replication Lag Monitor | ✅ `pg_stat_replication` + root-cause hints | ✅ Per-replica state/lag table + warning banner | **Complete** |
 | 8 | Log Insights | ✅ `pg_stat_database` + `pg_stat_activity` + delta tracking | ✅ Error/warning table + summary cards + filters | **Complete** |
-| 8 | Schema Change Markers | ✅ Schema diff collector + event tracking | ✅ API types | **Backend complete** |
-| 9 | Query Plan Regression Detection | ✅ EXPLAIN capture + plan shape hash diffing | ✅ API types | **Backend complete** |
-| 9 | PgBouncer Awareness | ✅ Pool metrics + pool exhaustion alerting | ✅ API types | **Backend complete** |
-| 10 | Cost-Per-Query Estimator | ✅ IO + CPU cost model with RDS defaults | ✅ API types | **Backend complete** |
+| 8 | Schema Change Markers | ✅ Schema diff collector + event tracking | ✅ Schema page + chart overlay markers | **Complete** |
+| 9 | Query Plan Regression Detection | ✅ EXPLAIN capture + plan shape hash diffing | ✅ Plans page with timeline + regression markers | **Complete** |
+| 9 | PgBouncer Awareness | ✅ Pool metrics + pool exhaustion alerting | ✅ Pooler page with pool utilization dashboard | **Complete** |
+| 9 | Onboarding Wizard | ✅ Validate + capabilities endpoints | ✅ 7-step guided setup at /onboarding | **Complete** |
+| 10 | Cost-Per-Query Estimator | ✅ IO + CPU cost model with RDS defaults | ✅ Cost dashboard page | **Complete** |
 | — | Data Retention | ✅ Tier-based (Free=1d, Pro=30d, Team=90d) | — | **Complete** |
 | — | Email Alerting | ✅ Nodemailer SMTP + HTML templates | ✅ SMTP config form + test button | **Complete** |
 | — | Query Text Redaction | ✅ Literal stripping before storage | — | **Complete** |
 | — | Plan-based Feature Gating | ✅ Pro/Team tier enforcement | — | **Complete** |
+| — | Test Suite | ✅ Vitest (80 tests, 5 suites) | — | **Complete** |
 
 > [!IMPORTANT]
-> **Phases 1–10 (backend) are fully implemented.** Phases 8–10 have API + collector backends but frontend UI pages are pending. Phase 3 auth (Clerk) and billing (Stripe) require external service accounts to activate.
+> **All phases 1–10 are fully implemented (backend + frontend).** Phase 3 auth (Clerk) and billing (Stripe) require external service accounts to activate. All other features from the product spec are complete.
 
 ---
 
@@ -1134,13 +1207,9 @@ pnpm dev                          # Start collector (3001) + web (3000)
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
+| Auth (Clerk JWT) | High | Middleware exists but requires Clerk account to activate |
 | Billing (Stripe) | Medium | Schema has `plan_tier` + `stripe_customer_id` ready |
-| HypoPG index simulation | Medium | Requires `hypopg` extension on customer DB — opt-in enhancement |
-| Onboarding wizard | Medium | Multi-step setup flow for new users |
-| Alert feedback (thumbs up/down) | Low | Requires schema + UI for feedback mechanism |
-| PagerDuty / Teams / generic webhook | Low | Notifier architecture supports extension |
 | EXPLAIN ANALYZE (with execution) | Low | Currently uses `EXPLAIN` without `ANALYZE` for safety |
-| Frontend pages for Phases 8–10 | Medium | Schema events, plan regression, PgBouncer, cost estimator pages |
 
 ### Technical Debt
 
@@ -1150,9 +1219,7 @@ pnpm dev                          # Start collector (3001) + web (3000)
 | Duplicate snapshot query in connection spike | `rules-engine.ts:250-266` | Queries snapshots twice (once unused) |
 | No input validation framework | All routes | Manual validation, no Fastify schema/Zod |
 | No rate limiting | Collector API | Wide open — needs rate limiting for production |
-| No test suite | Entire project | Zero tests |
 | Web app uses `<a>` instead of `<Link>` | Page components | Should use Next.js `Link` for client-side navigation to avoid full page reloads |
-| Charts are custom SVG | Web components | Works but no zoom/pan/tooltip interactivity beyond basics |
 
 ### Environment & Configuration Notes
 
@@ -1162,3 +1229,4 @@ pnpm dev                          # Start collector (3001) + web (3000)
 | `pnpm-workspace.yaml` has placeholder | `allowBuilds: esbuild: set this to true or false` needs to be set |
 | No CI/CD pipeline | No GitHub Actions or similar |
 | No Dockerfile in repo | Deployment guide describes them but they're not committed |
+
