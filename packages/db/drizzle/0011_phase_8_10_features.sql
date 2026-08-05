@@ -6,7 +6,7 @@
 -- 1. Schema events table (§2.13)
 CREATE TABLE IF NOT EXISTS schema_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  monitored_db_id TEXT NOT NULL REFERENCES monitored_databases(id) ON DELETE CASCADE,
+  monitored_db_id UUID NOT NULL REFERENCES monitored_databases(id) ON DELETE CASCADE,
   event_type TEXT NOT NULL,
   object_name TEXT NOT NULL,
   detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -19,7 +19,7 @@ CREATE INDEX IF NOT EXISTS idx_schema_events_db_time
 -- 2. Schema snapshots table (§2.13)
 CREATE TABLE IF NOT EXISTS schema_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  monitored_db_id TEXT NOT NULL REFERENCES monitored_databases(id) ON DELETE CASCADE,
+  monitored_db_id UUID NOT NULL REFERENCES monitored_databases(id) ON DELETE CASCADE,
   captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   tables_json JSONB NOT NULL,
   indexes_json JSONB NOT NULL
@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_schema_snapshots_db_time
 -- 3. Query plan snapshots hypertable (§2.10)
 CREATE TABLE IF NOT EXISTS query_plan_snapshots (
   id UUID NOT NULL DEFAULT gen_random_uuid(),
-  monitored_db_id TEXT NOT NULL REFERENCES monitored_databases(id) ON DELETE CASCADE,
+  monitored_db_id UUID NOT NULL REFERENCES monitored_databases(id) ON DELETE CASCADE,
   queryid BIGINT NOT NULL,
   captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   plan_json JSONB,
@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_query_plans_db_query_time
 -- 4. Pooler snapshots hypertable (§2.12)
 CREATE TABLE IF NOT EXISTS pooler_snapshots (
   id UUID NOT NULL DEFAULT gen_random_uuid(),
-  monitored_db_id TEXT NOT NULL REFERENCES monitored_databases(id) ON DELETE CASCADE,
+  monitored_db_id UUID NOT NULL REFERENCES monitored_databases(id) ON DELETE CASCADE,
   captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   pool_name TEXT NOT NULL,
   cl_active INTEGER NOT NULL DEFAULT 0,
