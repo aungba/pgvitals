@@ -616,6 +616,28 @@ export async function getDiskGrowth(
   );
 }
 
+/* ---------- Per-Table XID Ages ---------- */
+
+export interface TableXidEntry {
+  schemaName: string;
+  tableName: string;
+  xidAge: number;
+  xidPercent: number;
+  tableSize: number;
+  lastVacuum: string | null;
+  lastAutovacuum: string | null;
+}
+
+export async function getXidPerTable(
+  dbId: string,
+  token?: string,
+): Promise<{ freezeMaxAge: number; tables: TableXidEntry[] }> {
+  return request<{ freezeMaxAge: number; tables: TableXidEntry[] }>(
+    `/api/databases/${dbId}/xid-per-table`,
+    { token },
+  );
+}
+
 /* ---------- Replication Lag Monitor ---------- */
 
 export interface ReplicationSnapshot {

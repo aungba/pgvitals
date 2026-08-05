@@ -10,6 +10,7 @@ import {
   getTableCacheHit,
   getDiskGrowth,
   getReplicationStats,
+  getXidPerTable,
 } from "../../../lib/api";
 import type {
   Database,
@@ -18,6 +19,7 @@ import type {
   TableCacheHit,
   TableSizeEntry,
   ReplicationSnapshot,
+  TableXidEntry,
 } from "../../../lib/api";
 import {
   LineChart,
@@ -87,6 +89,8 @@ export default function HealthPage() {
   const [cacheHitTables, setCacheHitTables] = useState<TableCacheHit[]>([]);
   const [diskGrowthTables, setDiskGrowthTables] = useState<TableSizeEntry[]>([]);
   const [replicas, setReplicas] = useState<ReplicationSnapshot[]>([]);
+  const [tableXids, setTableXids] = useState<TableXidEntry[]>([]);
+  const [xidFreezeMax, setXidFreezeMax] = useState<number>(200000000);
 
   const fetchData = useCallback(async () => {
     try {
@@ -101,14 +105,17 @@ export default function HealthPage() {
       setHealthHistory(healthData.history);
       // Fetch cache hit and disk growth data
       try {
-        const [cacheData, growthData, replData] = await Promise.all([
+        const [cacheData, growthData, replData, xidData] = await Promise.all([
           getTableCacheHit(id),
           getDiskGrowth(id),
           getReplicationStats(id),
+          getXidPerTable(id).catch(() => ({ freezeMaxAge: 200000000, tables: [] })),
         ]);
         setCacheHitTables(cacheData.tables);
         setDiskGrowthTables(growthData.tables);
         setReplicas(replData.replicas);
+        setTableXids(xidData.tables);
+        setXidFreezeMax(xidData.freezeMaxAge);
       } catch {
         // optional data
       }
@@ -257,6 +264,72 @@ export default function HealthPage() {
                 : " Nearing the autovacuum freeze threshold. Verify autovacuum is enabled and running."
             }
             {" "}Run <code style={{ background: "var(--surface-alt)", padding: "1px 4px", borderRadius: 3, fontFamily: "var(--font-mono)", fontSize: "0.85em" }}>VACUUM FREEZE</code> on large tables if autovacuum is not keeping up.
+          </div>
+        </div>
+      )}
+
+      {/* ---- Per-Table XID Ages ---- */}
+      {tableXids.length > 0 && (
+        <div className="glass-card-static" style={{ padding: "var(--space-lg)", marginBottom: "var(--space-lg)" }}>
+          <div className="section-title" style={{ marginBottom: "var(--space-md)" }}>
+            Per-Table XID Ages
+            <span style={{ fontSize: "0.75rem", fontWeight: 400, color: "var(--text-secondary)", marginLeft: 8 }}>
+              freeze threshold: {formatNumber(xidFreezeMax)}
+            </span>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table" style={{ width: "100%" }}>
+              <thead>
+                <tr>
+                  <th>Table</th>
+                  <th>XID Age</th>
+                  <th>% of Threshold</th>
+                  <th>Size</th>
+                  <th>Last Vacuum</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tableXids.map((t) => {
+                  const barColor = t.xidPercent > 80 ? "var(--signal-critical)" : t.xidPercent > 50 ? "var(--signal-warning)" : "var(--accent)";
+                  return (
+                    <tr key={`${t.schemaName}.${t.tableName}`}>
+                      <td style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}>
+                        {t.schemaName !== "public" ? `${t.schemaName}.` : ""}{t.tableName}
+                      </td>
+                      <td style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}>
+                        {formatNumber(t.xidAge)}
+                      </td>
+                      <td style={{ minWidth: 160 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{
+                            flex: 1, height: 8, borderRadius: 4,
+                            background: "var(--surface-alt)", overflow: "hidden",
+                          }}>
+                            <div style={{
+                              width: `${Math.min(t.xidPercent, 100)}%`,
+                              height: "100%", borderRadius: 4,
+                              background: barColor,
+                              transition: "width 0.3s ease",
+                            }} />
+                          </div>
+                          <span style={{
+                            fontSize: "0.78rem", fontFamily: "var(--font-mono)",
+                            color: barColor, fontWeight: t.xidPercent > 80 ? 600 : 400,
+                            minWidth: 45, textAlign: "right",
+                          }}>
+                            {t.xidPercent.toFixed(1)}%
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ fontSize: "0.82rem" }}>{formatBytes(t.tableSize)}</td>
+                      <td style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+                        {timeAgo(t.lastAutovacuum ?? t.lastVacuum)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

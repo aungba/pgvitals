@@ -3,10 +3,14 @@ import { db, tableBloatStats, dbHealthSnapshots, tableSizeHistory, monitoredData
 import { eq, desc, and, gte } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
+import { decrypt } from "../lib/encryption.js";
+import { safeQuery } from "../lib/safe-query.js";
+import { config } from "../config.js";
 
 /* ===================================================================
    VACUUM & Health Routes — Phase 6
    =================================================================== */
+
 
 /**
  * Verifies that the given database belongs to the given organization.
@@ -253,6 +257,95 @@ export default async function healthRoutes(app: FastifyInstance): Promise<void> 
       } catch (err) {
         request.log.error({ err }, "Failed to get disk growth data");
         return reply.status(500).send({ error: "Failed to get disk growth data" });
+      }
+    }
+  );
+
+  /**
+   * GET /api/databases/:id/xid-per-table
+   * Live query: per-table XID ages from pg_class.relfrozenxid.
+   * Returns tables sorted by oldest XID age first.
+   */
+  app.get<{ Params: { id: string } }>(
+    "/api/databases/:id/xid-per-table",
+    { preHandler: [authMiddleware, requireFeature('vacuumAdvisorEnabled')] },
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+
+        if (!await verifyDbOwnership(id, request.auth.orgId)) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const [mdb] = await db
+          .select()
+          .from(monitoredDatabases)
+          .where(eq(monitoredDatabases.id, id))
+          .limit(1);
+
+        if (!mdb) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const connectionString = decrypt(mdb.connectionStringEncrypted, config.encryptionKey);
+
+        interface TableXidRow {
+          schemaname: string;
+          relname: string;
+          xid_age: string;
+          table_size: string;
+          last_vacuum: string | null;
+          last_autovacuum: string | null;
+        }
+
+        const rows = await safeQuery<TableXidRow[]>(
+          connectionString,
+          `SELECT
+            n.nspname AS schemaname,
+            c.relname,
+            age(c.relfrozenxid)::text AS xid_age,
+            pg_total_relation_size(c.oid)::text AS table_size,
+            s.last_vacuum::text,
+            s.last_autovacuum::text
+          FROM pg_class c
+          JOIN pg_namespace n ON c.relnamespace = n.oid
+          LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+          WHERE c.relkind = 'r'
+            AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+            AND c.relname NOT LIKE '_hyper_%'
+            AND c.relname NOT LIKE '_timescaledb_%'
+          ORDER BY age(c.relfrozenxid) DESC
+          LIMIT 50`,
+          { timeoutMs: 10000 }
+        );
+
+        // Also get the freeze threshold
+        const [freezeRow] = await safeQuery<Array<{ autovacuum_freeze_max_age: string }>>(
+          connectionString,
+          `SHOW autovacuum_freeze_max_age`,
+          { timeoutMs: 3000 }
+        );
+        const freezeMaxAge = freezeRow ? parseInt(freezeRow.autovacuum_freeze_max_age, 10) : 200000000;
+
+        return reply.send({
+          freezeMaxAge,
+          tables: rows.map((r) => {
+            const xidAge = parseInt(r.xid_age, 10) || 0;
+            const tableSize = parseInt(r.table_size, 10) || 0;
+            return {
+              schemaName: r.schemaname,
+              tableName: r.relname,
+              xidAge,
+              xidPercent: freezeMaxAge > 0 ? Math.round((xidAge / freezeMaxAge) * 10000) / 100 : 0,
+              tableSize,
+              lastVacuum: r.last_vacuum,
+              lastAutovacuum: r.last_autovacuum,
+            };
+          }),
+        });
+      } catch (err) {
+        request.log.error({ err }, "Failed to get per-table XID ages");
+        return reply.status(500).send({ error: "Failed to get per-table XID ages" });
       }
     }
   );
