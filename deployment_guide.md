@@ -88,6 +88,48 @@ Create an Ubuntu VM with your preferred cloud provider. Required:
 > [!NOTE]
 > You can use a single domain with path-based routing instead of subdomains. This guide uses subdomains for clarity.
 
+### 2.1 Sizing Guide
+
+Choose a VM size based on how many PostgreSQL databases you'll monitor:
+
+| | **Small** (1–5 DBs) | **Medium** (5–20 DBs) | **Large** (20–50 DBs) |
+|---|---|---|---|
+| **vCPU** | 2 | 4 | 8 |
+| **RAM** | 4 GB | 8 GB | 16 GB |
+| **Disk** | 40 GB SSD | 80 GB SSD | 160 GB SSD |
+
+#### Where the resources go
+
+| Component | RAM | CPU | Disk |
+|-----------|-----|-----|------|
+| **TimescaleDB** | 1–4 GB (shared_buffers) | Low–moderate | Grows ~50–200 MB/DB/month |
+| **Redis** | 50–256 MB | Minimal | < 100 MB |
+| **Collector (Node.js)** | 100–300 MB | Spikes every 10s poll | Logs only |
+| **Web (Next.js)** | 100–200 MB | On page requests | ~200 MB build cache |
+| **Nginx + OS** | ~500 MB | Minimal | ~5 GB |
+
+#### Disk growth by retention tier
+
+| Tier | Retention | Disk per DB/month |
+|------|-----------|-------------------|
+| Free | 1 day | ~5 MB (auto-purged) |
+| Pro | 30 days | ~150 MB |
+| Team | 90 days | ~400 MB |
+
+**Example:** 10 databases on Pro plan ≈ 1.5 GB/month. An 80 GB disk gives you 3+ years before needing expansion.
+
+#### Cloud provider pricing (approximate)
+
+| Provider | Small (2c/4GB) | Medium (4c/8GB) |
+|----------|---------------|-----------------|
+| **Hetzner** | €7/mo | €14/mo |
+| **DigitalOcean** | $24/mo | $48/mo |
+| **Linode** | $24/mo | $48/mo |
+| **AWS EC2** (t3.medium/large) | $30/mo | $60/mo |
+
+> [!TIP]
+> Start with the **Small** tier. PG Vitals is lightweight — you can always resize the VM later. TimescaleDB is the main resource consumer.
+
 ---
 
 ## 3. Initial Server Setup
