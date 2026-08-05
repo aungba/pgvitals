@@ -1426,3 +1426,90 @@ h4 { font-size: 1.1rem; }
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ===================================================================
+   Database Sub-Navigation Tabs
+   =================================================================== */
+
+.db-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  margin: -1.5rem -1.5rem 1.5rem -1.5rem;
+  padding: 0 1.5rem;
+}
+
+.db-nav-tabs {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.db-nav-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.db-nav-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  position: relative;
+}
+
+.db-nav-tab:hover {
+  color: var(--text);
+  background: var(--card-bg);
+}
+
+.db-nav-tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.db-nav-tab--active:hover {
+  color: var(--accent);
+}
+
+.db-nav-tab-icon {
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.db-nav-tab-label {
+  line-height: 1;
+}
+
+/* Responsive: smaller padding on small screens */
+@media (max-width: 768px) {
+  .db-nav {
+    margin: -1rem -1rem 1rem -1rem;
+    padding: 0 0.5rem;
+  }
+
+  .db-nav-tab {
+    padding: 0.6rem 0.7rem;
+    font-size: 0.78rem;
+  }
+
+  .db-nav-tab-label {
+    display: none;
+  }
+
+  .db-nav-tab-icon {
+    font-size: 1.1rem;
+  }
+}
+
