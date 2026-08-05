@@ -158,12 +158,86 @@ export async function collectPlanSnapshots(
 
   for (const query of topQueries) {
     try {
-      // Run EXPLAIN (not ANALYZE) to get the plan without executing
-      const explainResult = await safeQuery<Array<{ "QUERY PLAN": PlanNode[] }>>(
-        connectionString,
-        `EXPLAIN (FORMAT JSON) ${query.queryText}`,
-        { timeoutMs: 10000 }
-      );
+      if (!query.queryText) continue;
+
+      // Skip utility statements that can't be EXPLAINed
+      const trimmed = query.queryText.trim().toUpperCase();
+      if (
+        trimmed.startsWith("SET ") ||
+        trimmed.startsWith("RESET ") ||
+        trimmed.startsWith("COPY ") ||
+        trimmed.startsWith("CREATE ") ||
+        trimmed.startsWith("ALTER ") ||
+        trimmed.startsWith("DROP ") ||
+        trimmed.startsWith("GRANT ") ||
+        trimmed.startsWith("REVOKE ") ||
+        trimmed.startsWith("VACUUM ") ||
+        trimmed.startsWith("ANALYZE ") ||
+        trimmed.startsWith("COMMIT") ||
+        trimmed.startsWith("BEGIN") ||
+        trimmed.startsWith("ROLLBACK") ||
+        trimmed.startsWith("LISTEN") ||
+        trimmed.startsWith("UNLISTEN") ||
+        trimmed.startsWith("CLOSE") ||
+        trimmed.startsWith("DEALLOCATE") ||
+        trimmed.startsWith("DISCARD")
+      ) {
+        continue;
+      }
+
+      // pg_stat_statements stores queries with $1, $2 parameter placeholders.
+      // We need to use PREPARE + EXPLAIN (GENERIC_PLAN) to get plans for these.
+      // Count the number of parameters to build the type list.
+      const paramMatches = query.queryText.match(/\$\d+/g);
+      const paramCount = paramMatches
+        ? Math.max(...paramMatches.map((p) => parseInt(p.slice(1), 10)))
+        : 0;
+
+      let explainResult: Array<{ "QUERY PLAN": PlanNode[] }> | undefined;
+
+      if (paramCount > 0) {
+        // Use PREPARE + EXPLAIN (FORMAT JSON, GENERIC_PLAN) for parameterized queries
+        const paramTypes = Array(paramCount).fill("unknown").join(", ");
+        const stmtName = `pgv_plan_${query.queryid}`;
+
+        try {
+          await safeQuery(
+            connectionString,
+            `DEALLOCATE ${stmtName}`,
+            { timeoutMs: 3000 }
+          ).catch(() => {}); // ignore if not exists
+
+          await safeQuery(
+            connectionString,
+            `PREPARE ${stmtName}(${paramTypes}) AS ${query.queryText}`,
+            { timeoutMs: 5000 }
+          );
+
+          explainResult = await safeQuery<Array<{ "QUERY PLAN": PlanNode[] }>>(
+            connectionString,
+            `EXPLAIN (FORMAT JSON, GENERIC_PLAN) EXECUTE ${stmtName}`,
+            { timeoutMs: 10000 }
+          );
+
+          await safeQuery(
+            connectionString,
+            `DEALLOCATE ${stmtName}`,
+            { timeoutMs: 3000 }
+          ).catch(() => {});
+        } catch {
+          // GENERIC_PLAN not available (PG < 16) or query can't be prepared
+          // Fall back: skip this query
+          log.debug({ queryid: query.queryid }, "EXPLAIN with GENERIC_PLAN failed, skipping");
+          continue;
+        }
+      } else {
+        // No parameters — EXPLAIN directly
+        explainResult = await safeQuery<Array<{ "QUERY PLAN": PlanNode[] }>>(
+          connectionString,
+          `EXPLAIN (FORMAT JSON) ${query.queryText}`,
+          { timeoutMs: 10000 }
+        );
+      }
 
       if (!explainResult || explainResult.length === 0) continue;
 
