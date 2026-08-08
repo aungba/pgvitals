@@ -5,11 +5,15 @@ import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getDatabase, getQueryPlanHistory, getQueryCostEstimates } from "../../../lib/api";
 import type { Database, PlanSnapshot, QueryCostEstimate } from "../../../lib/api";
+import PlanTreeVisualizer from "../../../components/PlanTreeVisualizer";
+import PlanListView from "../../../components/PlanListView";
 
 /* ===================================================================
-   Plan Regression Page — Phase 9
-   Query plan shape tracking + regression detection
+   Plan Regression Page — Phase 9 + Spec v4 §2.3
+   Query plan shape tracking + regression detection + visualization
    =================================================================== */
+
+type ViewMode = "tree" | "list" | "json";
 
 function formatTimestamp(ts: string): string {
   return new Date(ts).toLocaleString("en-US", {
@@ -32,6 +36,11 @@ export default function PlansPage() {
   const [loading, setLoading] = useState(true);
   const [plansLoading, setPlansLoading] = useState(false);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("tree");
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pastedPlan, setPastedPlan] = useState<any>(null);
+  const [pasteText, setPasteText] = useState("");
+  const [pasteError, setPasteError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -68,7 +77,96 @@ export default function PlansPage() {
     }
   }, [selectedQueryId, fetchPlans]);
 
+  const handlePaste = () => {
+    setPasteError(null);
+    try {
+      const parsed = JSON.parse(pasteText);
+      // Handle various EXPLAIN JSON formats
+      let planRoot;
+      if (Array.isArray(parsed)) {
+        // EXPLAIN (FORMAT JSON) returns an array with one element containing { "Plan": {...} }
+        planRoot = parsed[0]?.Plan || parsed[0];
+      } else if (parsed.Plan) {
+        planRoot = parsed.Plan;
+      } else if (parsed["Node Type"]) {
+        planRoot = parsed;
+      } else {
+        throw new Error("Unrecognized plan format");
+      }
+      setPastedPlan(planRoot);
+      setShowPasteModal(false);
+      setPasteText("");
+    } catch (e) {
+      setPasteError(e instanceof Error ? e.message : "Invalid JSON. Paste the output of EXPLAIN (FORMAT JSON).");
+    }
+  };
+
   const regressionCount = plans.filter((p) => p.regression).length;
+
+  const getPlanRoot = (planJson: any) => {
+    if (!planJson) return null;
+    // planJson is stored as the array from EXPLAIN, e.g. [{ "Plan": {...}, "Planning Time": ... }]
+    if (Array.isArray(planJson)) {
+      const first = planJson[0];
+      return first?.Plan || first;
+    }
+    if (planJson.Plan) return planJson.Plan;
+    if (planJson["Node Type"]) return planJson;
+    return null;
+  };
+
+  // View mode toggle buttons
+  const ViewModeToggle = () => (
+    <div style={{
+      display: "inline-flex", borderRadius: "var(--radius-md)",
+      border: "1px solid var(--border)", overflow: "hidden",
+    }}>
+      {([
+        { mode: "tree" as ViewMode, label: "🗺️ Tree", title: "Map View" },
+        { mode: "list" as ViewMode, label: "📋 List", title: "List View" },
+        { mode: "json" as ViewMode, label: "{ }", title: "Raw JSON" },
+      ]).map(({ mode, label, title }) => (
+        <button
+          key={mode}
+          onClick={() => setViewMode(mode)}
+          title={title}
+          style={{
+            padding: "6px 14px", fontSize: "0.75rem", fontWeight: 600,
+            border: "none", cursor: "pointer",
+            background: viewMode === mode ? "var(--brand)" : "var(--surface-alt)",
+            color: viewMode === mode ? "#fff" : "var(--text-secondary)",
+            transition: "all 0.15s ease",
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  // Render plan content based on view mode
+  const renderPlanContent = (planJson: any) => {
+    const root = getPlanRoot(planJson);
+    if (!root) return <div style={{ color: "var(--text-muted)" }}>No plan data available</div>;
+
+    switch (viewMode) {
+      case "tree":
+        return <PlanTreeVisualizer plan={root} />;
+      case "list":
+        return <PlanListView plan={root} />;
+      case "json":
+        return (
+          <pre style={{
+            padding: "var(--space-md)", background: "var(--bg)",
+            borderRadius: "var(--radius-md)", border: "1px solid var(--border)",
+            overflow: "auto", maxHeight: 500, fontSize: "0.75rem",
+            fontFamily: "var(--font-mono)", color: "var(--text-secondary)",
+          }}>
+            {JSON.stringify(planJson, null, 2)}
+          </pre>
+        );
+    }
+  };
 
   if (loading) {
     return (
@@ -100,11 +198,57 @@ export default function PlansPage() {
           <div>
             <h1>Plan Regression — {database?.name}</h1>
             <p className="text-secondary" style={{ fontSize: "0.9rem" }}>
-              Track EXPLAIN plan changes that may indicate performance degradation
+              Track EXPLAIN plan changes and visualize execution plans
             </p>
           </div>
         </div>
+        <div style={{ display: "flex", gap: "var(--space-sm)", alignItems: "center" }}>
+          <ViewModeToggle />
+          <button
+            onClick={() => setShowPasteModal(true)}
+            style={{
+              padding: "8px 16px", fontSize: "0.8rem", fontWeight: 600,
+              background: "var(--surface-alt)", border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)", cursor: "pointer",
+              color: "var(--text-primary)", transition: "all 0.15s ease",
+              display: "flex", alignItems: "center", gap: "var(--space-xs)",
+            }}
+          >
+            📋 Paste Plan
+          </button>
+        </div>
       </div>
+
+      {/* Pasted plan display */}
+      {pastedPlan && (
+        <div style={{ marginBottom: "var(--space-lg)" }}>
+          <div className="glass-card-static" style={{ padding: "var(--space-lg)" }}>
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              marginBottom: "var(--space-md)",
+            }}>
+              <div style={{
+                fontSize: "0.75rem", fontWeight: 600, color: "var(--text-muted)",
+                textTransform: "uppercase", letterSpacing: "0.05em",
+              }}>
+                📋 Pasted Plan
+              </div>
+              <button
+                onClick={() => setPastedPlan(null)}
+                style={{
+                  padding: "4px 12px", fontSize: "0.75rem",
+                  background: "var(--surface-alt)", border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)", cursor: "pointer",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                ✕ Close
+              </button>
+            </div>
+            {renderPlanContent(pastedPlan)}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: "var(--space-lg)", alignItems: "start" }}>
         {/* Query Selector */}
@@ -195,11 +339,15 @@ export default function PlansPage() {
 
               <div className="glass-card-static" style={{ padding: "var(--space-lg)" }}>
                 <div style={{
-                  fontSize: "0.75rem", fontWeight: 600, color: "var(--text-muted)",
-                  textTransform: "uppercase", letterSpacing: "0.05em",
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
                   marginBottom: "var(--space-lg)",
                 }}>
-                  Plan History ({plans.length} snapshots)
+                  <div style={{
+                    fontSize: "0.75rem", fontWeight: 600, color: "var(--text-muted)",
+                    textTransform: "uppercase", letterSpacing: "0.05em",
+                  }}>
+                    Plan History ({plans.length} snapshots)
+                  </div>
                 </div>
 
                 {plans.map((plan) => (
@@ -240,9 +388,11 @@ export default function PlansPage() {
                         onClick={() => setExpandedPlan(expandedPlan === plan.id ? null : plan.id)}
                         style={{
                           padding: "4px 12px", fontSize: "0.75rem",
-                          background: "var(--surface)", border: "1px solid var(--border)",
+                          background: expandedPlan === plan.id ? "var(--brand)" : "var(--surface)",
+                          border: "1px solid var(--border)",
                           borderRadius: "var(--radius-sm)", cursor: "pointer",
-                          color: "var(--text-secondary)",
+                          color: expandedPlan === plan.id ? "#fff" : "var(--text-secondary)",
+                          transition: "all 0.15s ease",
                         }}
                       >
                         {expandedPlan === plan.id ? "Hide Plan" : "View Plan"}
@@ -275,17 +425,11 @@ export default function PlansPage() {
                       </div>
                     )}
 
-                    {/* Expanded plan JSON */}
+                    {/* Expanded plan visualization */}
                     {expandedPlan === plan.id && plan.planJson && (
-                      <pre style={{
-                        marginTop: "var(--space-md)", padding: "var(--space-md)",
-                        background: "var(--bg)", borderRadius: "var(--radius-md)",
-                        border: "1px solid var(--border)", overflow: "auto",
-                        maxHeight: 400, fontSize: "0.75rem", fontFamily: "var(--font-mono)",
-                        color: "var(--text-secondary)",
-                      }}>
-                        {JSON.stringify(plan.planJson, null, 2)}
-                      </pre>
+                      <div style={{ marginTop: "var(--space-md)" }}>
+                        {renderPlanContent(plan.planJson)}
+                      </div>
                     )}
                   </div>
                 ))}
@@ -294,6 +438,80 @@ export default function PlansPage() {
           )}
         </div>
       </div>
+
+      {/* Paste Plan Modal */}
+      {showPasteModal && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "var(--space-lg)",
+        }} onClick={() => setShowPasteModal(false)}>
+          <div
+            style={{
+              background: "var(--surface)", borderRadius: "var(--radius-lg)",
+              border: "1px solid var(--border)", padding: "var(--space-xl)",
+              maxWidth: 640, width: "100%", maxHeight: "80vh", overflow: "auto",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>
+              📋 Paste EXPLAIN Plan
+            </h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "var(--space-md)" }}>
+              Paste the output of <code style={{ fontFamily: "var(--font-mono)", background: "var(--surface-alt)", padding: "2px 6px", borderRadius: 4 }}>EXPLAIN (FORMAT JSON) your_query</code>
+            </p>
+            <textarea
+              value={pasteText}
+              onChange={(e) => { setPasteText(e.target.value); setPasteError(null); }}
+              placeholder={`[\n  {\n    "Plan": {\n      "Node Type": "Seq Scan",\n      "Relation Name": "users",\n      "Total Cost": 45200.00,\n      "Plan Rows": 100000,\n      ...\n    }\n  }\n]`}
+              style={{
+                width: "100%", minHeight: 200, padding: "var(--space-md)",
+                fontFamily: "var(--font-mono)", fontSize: "0.8rem",
+                background: "var(--bg)", border: "1px solid var(--border)",
+                borderRadius: "var(--radius-md)", color: "var(--text-primary)",
+                resize: "vertical",
+              }}
+            />
+            {pasteError && (
+              <div style={{
+                marginTop: "var(--space-sm)", fontSize: "0.8rem",
+                color: "var(--signal-critical)", padding: "var(--space-sm)",
+                background: "var(--signal-critical-dim)", borderRadius: "var(--radius-sm)",
+              }}>
+                ❌ {pasteError}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: "var(--space-sm)", marginTop: "var(--space-md)", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setShowPasteModal(false)}
+                style={{
+                  padding: "8px 20px", fontSize: "0.85rem", fontWeight: 500,
+                  background: "var(--surface-alt)", border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-md)", cursor: "pointer",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePaste}
+                disabled={!pasteText.trim()}
+                style={{
+                  padding: "8px 20px", fontSize: "0.85rem", fontWeight: 600,
+                  background: pasteText.trim() ? "var(--brand)" : "var(--surface-alt)",
+                  border: "none", borderRadius: "var(--radius-md)", cursor: "pointer",
+                  color: pasteText.trim() ? "#fff" : "var(--text-muted)",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                Visualize Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
