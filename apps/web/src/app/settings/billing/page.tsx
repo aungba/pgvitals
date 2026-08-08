@@ -69,9 +69,10 @@ export default function BillingPage() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const getToken = useApiToken();
+  const { getToken, isReady } = useApiToken();
 
   const fetchStatus = useCallback(async () => {
+    if (!isReady) return;
     try {
       const token = await getToken();
       const res = await fetch(`${API_URL}/api/billing/status`, {
@@ -85,7 +86,7 @@ export default function BillingPage() {
     } finally {
       setLoading(false);
     }
-  }, [getToken]);
+  }, [getToken, isReady]);
 
   useEffect(() => {
     fetchStatus();

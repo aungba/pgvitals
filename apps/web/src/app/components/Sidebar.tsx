@@ -111,7 +111,7 @@ export default function Sidebar() {
   // State is only used for the toggle chevron direction and tooltip text.
   // All visual styling comes from [data-sidebar="collapsed"] CSS selectors
   // which are driven by the data attribute on <html>.
-  const [collapsed, setCollapsed] = useState(getCollapsed);
+  const [collapsed, setCollapsed] = useState(false);
 
   const toggle = useCallback(() => {
     setCollapsed((prev) => {

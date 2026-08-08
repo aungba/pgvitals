@@ -1,32 +1,32 @@
 "use client";
 
 import { useCallback } from "react";
+import { useAuth } from "@clerk/nextjs";
 
 const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 /**
- * Hook that returns a function to get the current Clerk session token.
- * Returns undefined if auth is not configured (dev mode fallback).
+ * Hook that returns a function to get the current Clerk session token,
+ * plus an `isReady` flag indicating whether auth has finished loading.
+ *
+ * Pages should wait for `isReady` before making API calls.
  */
-export function useApiToken() {
+export function useApiToken(): { getToken: () => Promise<string | undefined>; isReady: boolean } {
   if (!clerkEnabled) {
-    // Dev mode — no auth tokens needed
-    return useCallback(async (): Promise<string | undefined> => {
+    // Dev mode — no auth tokens needed, always ready
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const fn = useCallback(async (): Promise<string | undefined> => {
       return undefined;
     }, []);
+    return { getToken: fn, isReady: true };
   }
 
   // Production mode — use Clerk's useAuth hook
   // eslint-disable-next-line react-hooks/rules-of-hooks
-  return useClerkToken();
-}
-
-function useClerkToken() {
-  // Dynamic require to avoid importing @clerk/nextjs when not configured
-  const { useAuth } = require("@clerk/nextjs");
   const { getToken, isLoaded } = useAuth();
 
-  return useCallback(async (): Promise<string | undefined> => {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const fn = useCallback(async (): Promise<string | undefined> => {
     if (!isLoaded) return undefined;
     try {
       const token = await getToken();
@@ -35,4 +35,6 @@ function useClerkToken() {
       return undefined;
     }
   }, [getToken, isLoaded]);
+
+  return { getToken: fn, isReady: isLoaded };
 }

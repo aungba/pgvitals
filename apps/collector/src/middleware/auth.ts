@@ -78,7 +78,7 @@ export async function authMiddleware(
     const clerkOrgId = (payload as Record<string, unknown>).org_id as string | undefined;
 
     // Sync user and org to our database
-    const { userId, orgId, planTier } = await syncUserAndOrg(
+    const { userId, orgId, planTier, role } = await syncUserAndOrg(
       clerkUserId,
       clerkOrgId ?? null,
       request

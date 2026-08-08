@@ -22,9 +22,10 @@ export default function DashboardPage() {
   const [items, setItems] = useState<DbWithOverview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const getToken = useApiToken();
+  const { getToken, isReady } = useApiToken();
 
   const fetchData = useCallback(async () => {
+    if (!isReady) return;
     try {
       const token = await getToken();
       const databases = await getDatabases(token);
@@ -48,7 +49,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [getToken]);
+  }, [getToken, isReady]);
 
   useEffect(() => {
     fetchData();

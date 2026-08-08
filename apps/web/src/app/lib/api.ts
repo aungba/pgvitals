@@ -106,8 +106,26 @@ async function request<T>(
   if (options?.body) {
     headers["Content-Type"] = "application/json";
   }
-  if (options?.token) {
-    headers["Authorization"] = `Bearer ${options.token}`;
+
+  // Use provided token, or auto-fetch from Clerk if available
+  let token = options?.token;
+  if (!token && typeof window !== "undefined") {
+    try {
+      const clerk = (window as any).__clerk_frontend_api
+        ? (window as any).Clerk
+        : (await import("@clerk/nextjs")).useClerk?.() ?? null;
+      // Simpler approach: use the Clerk global instance
+      const clerkInstance = (window as any).Clerk;
+      if (clerkInstance?.session) {
+        token = await clerkInstance.session.getToken() ?? undefined;
+      }
+    } catch {
+      // Clerk not available — continue without token (dev mode)
+    }
+  }
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
   const res = await fetch(url, {
     ...options,
