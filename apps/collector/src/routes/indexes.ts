@@ -5,7 +5,7 @@ import { analyzeIndexes } from "../collector/index-advisor.js";
 import { simulateIndex, isHypoPGAvailable } from "../collector/hypopg-simulator.js";
 import { decrypt } from "../lib/encryption.js";
 import { config } from "../config.js";
-import { authMiddleware } from "../middleware/auth.js";
+import { authMiddleware, requireRole } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
 
 /* ===================================================================
@@ -100,7 +100,7 @@ export default async function indexRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post<{ Params: { id: string; recId: string } }>(
     "/api/databases/:id/index-recommendations/:recId/dismiss",
-    { preHandler: [authMiddleware, requireFeature('indexAdvisorEnabled')] },
+    { preHandler: [authMiddleware, requireRole('owner', 'admin'), requireFeature('indexAdvisorEnabled')] },
     async (request, reply) => {
       try {
         const { id, recId } = request.params;
@@ -134,7 +134,7 @@ export default async function indexRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post<{ Params: { id: string; recId: string } }>(
     "/api/databases/:id/index-recommendations/:recId/restore",
-    { preHandler: [authMiddleware, requireFeature('indexAdvisorEnabled')] },
+    { preHandler: [authMiddleware, requireRole('owner', 'admin'), requireFeature('indexAdvisorEnabled')] },
     async (request, reply) => {
       try {
         const { id, recId } = request.params;

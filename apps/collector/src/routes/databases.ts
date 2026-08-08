@@ -4,7 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { encrypt } from "../lib/encryption.js";
 import { config } from "../config.js";
 import { scheduleDatabase, unscheduleDatabase } from "../collector/scheduler.js";
-import { authMiddleware } from "../middleware/auth.js";
+import { authMiddleware, requireRole } from "../middleware/auth.js";
 import { checkDatabaseLimit } from "../middleware/plan-limits.js";
 
 interface RegisterDatabaseBody {
@@ -44,7 +44,7 @@ export default async function databaseRoutes(app: FastifyInstance): Promise<void
    */
   app.post<{ Body: RegisterDatabaseBody }>(
     "/api/databases",
-    { preHandler: [authMiddleware, checkDatabaseLimit] },
+    { preHandler: [authMiddleware, checkDatabaseLimit, requireRole('owner', 'admin')] },
     async (request, reply) => {
       try {
         const { name, connectionString, environment } = request.body;
@@ -126,7 +126,7 @@ export default async function databaseRoutes(app: FastifyInstance): Promise<void
    */
   app.delete<{ Params: { id: string } }>(
     "/api/databases/:id",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware, requireRole('owner')] },
     async (request, reply) => {
       try {
         const { id } = request.params;
@@ -166,6 +166,7 @@ export default async function databaseRoutes(app: FastifyInstance): Promise<void
    */
   app.post<{ Body: { connectionString: string } }>(
     "/api/databases/validate",
+    { preHandler: [authMiddleware, requireRole('owner', 'admin')] },
     async (request, reply) => {
       const { connectionString } = request.body as { connectionString: string };
       if (!connectionString) {
@@ -208,6 +209,7 @@ export default async function databaseRoutes(app: FastifyInstance): Promise<void
    */
   app.post<{ Body: { connectionString: string } }>(
     "/api/databases/capabilities",
+    { preHandler: [authMiddleware, requireRole('owner', 'admin')] },
     async (request, reply) => {
       const { connectionString } = request.body as { connectionString: string };
       if (!connectionString) {

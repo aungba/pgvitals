@@ -12,6 +12,7 @@ declare module "fastify" {
       clerkUserId: string;
       clerkOrgId: string | null;
       planTier: "free" | "pro" | "team";
+      role: "owner" | "admin" | "member";
     };
   }
 }
@@ -43,7 +44,7 @@ export async function authMiddleware(
     }
 
     const [user] = await db
-      .select({ id: users.id })
+      .select({ id: users.id, role: users.role })
       .from(users)
       .where(eq(users.orgId, org.id))
       .limit(1);
@@ -54,6 +55,7 @@ export async function authMiddleware(
       clerkUserId: "dev-user",
       clerkOrgId: null,
       planTier: org.planTier,
+      role: user?.role ?? "owner",
     };
     return;
   }
@@ -88,6 +90,7 @@ export async function authMiddleware(
       clerkUserId,
       clerkOrgId: clerkOrgId ?? null,
       planTier,
+      role,
     };
   } catch (err) {
     request.log.warn({ err }, "JWT verification failed");
@@ -103,7 +106,7 @@ async function syncUserAndOrg(
   clerkUserId: string,
   clerkOrgId: string | null,
   request: FastifyRequest
-): Promise<{ userId: string; orgId: string; planTier: "free" | "pro" | "team" }> {
+): Promise<{ userId: string; orgId: string; planTier: "free" | "pro" | "team"; role: "owner" | "admin" | "member" }> {
   // 1. Find or create organization
   let org;
 
@@ -180,5 +183,27 @@ async function syncUserAndOrg(
     userId: user.id,
     orgId: org.id,
     planTier: org.planTier,
+    role: user.role,
+  };
+}
+
+/**
+ * Creates a preHandler that checks if the user has one of the required roles.
+ * Must be used AFTER authMiddleware (depends on request.auth.role).
+ *
+ * Usage:
+ *   { preHandler: [authMiddleware, requireRole('owner')] }           // owner only
+ *   { preHandler: [authMiddleware, requireRole('owner', 'admin')] }  // owner or admin
+ */
+export function requireRole(...allowedRoles: Array<"owner" | "admin" | "member">) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!allowedRoles.includes(request.auth.role)) {
+      return reply.status(403).send({
+        error: `This action requires ${allowedRoles.join(" or ")} role.`,
+        code: "INSUFFICIENT_ROLE",
+        currentRole: request.auth.role,
+        requiredRoles: allowedRoles,
+      });
+    }
   };
 }

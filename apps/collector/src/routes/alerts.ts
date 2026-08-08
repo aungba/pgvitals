@@ -3,7 +3,7 @@ import { db, alerts, alertRules, monitoredDatabases } from "@pgvitals/db";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { sendTestNotification } from "../alerting/notifier.js";
 import { sendTestEmailNotification, type EmailConfig } from "../alerting/email-notifier.js";
-import { authMiddleware } from "../middleware/auth.js";
+import { authMiddleware, requireRole } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
 
 /* ===================================================================
@@ -149,7 +149,7 @@ export default async function alertRoutes(app: FastifyInstance): Promise<void> {
     };
   }>(
     "/api/databases/:id/alert-rules",
-    { preHandler: [authMiddleware, requireFeature('alertingEnabled')] },
+    { preHandler: [authMiddleware, requireRole('owner', 'admin'), requireFeature('alertingEnabled')] },
     async (request, reply) => {
       try {
         const { id } = request.params;
@@ -232,7 +232,7 @@ export default async function alertRoutes(app: FastifyInstance): Promise<void> {
     };
   }>(
     "/api/databases/:id/alert-rules/:ruleId",
-    { preHandler: [authMiddleware, requireFeature('alertingEnabled')] },
+    { preHandler: [authMiddleware, requireRole('owner', 'admin'), requireFeature('alertingEnabled')] },
     async (request, reply) => {
       try {
         const { id, ruleId } = request.params;
@@ -273,7 +273,7 @@ export default async function alertRoutes(app: FastifyInstance): Promise<void> {
    */
   app.delete<{ Params: { id: string; ruleId: string } }>(
     "/api/databases/:id/alert-rules/:ruleId",
-    { preHandler: [authMiddleware, requireFeature('alertingEnabled')] },
+    { preHandler: [authMiddleware, requireRole('owner', 'admin'), requireFeature('alertingEnabled')] },
     async (request, reply) => {
       try {
         const { id, ruleId } = request.params;
