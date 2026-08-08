@@ -2,19 +2,9 @@
 
 import { useCallback, useEffect } from "react";
 import { useAuth } from "@clerk/nextjs";
+import { setGlobalTokenGetter } from "./tokenStore";
 
 const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
-/**
- * Global token getter — set by useApiToken hook, used by api.ts request().
- * This avoids the need to pass tokens through every component/page.
- */
-let globalTokenGetter: (() => Promise<string | null>) | null = null;
-
-export function getGlobalToken(): Promise<string | null> {
-  if (globalTokenGetter) return globalTokenGetter();
-  return Promise.resolve(null);
-}
 
 /**
  * Hook that returns a function to get the current Clerk session token,
@@ -40,10 +30,10 @@ export function useApiToken(): { getToken: () => Promise<string | undefined>; is
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     if (isLoaded) {
-      globalTokenGetter = getToken;
+      setGlobalTokenGetter(getToken);
     }
     return () => {
-      globalTokenGetter = null;
+      setGlobalTokenGetter(null);
     };
   }, [getToken, isLoaded]);
 

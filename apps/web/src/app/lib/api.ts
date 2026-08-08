@@ -94,7 +94,7 @@ class ApiError extends Error {
     this.name = "ApiError";
   }
 }
-import { getGlobalToken } from "./useApiToken";
+import { getGlobalToken } from "./tokenStore";
 
 async function request<T>(
   path: string,
