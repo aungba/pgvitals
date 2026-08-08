@@ -539,6 +539,29 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
   );
 
   /**
+   * GET /api/databases/:id/queries/plan-tracked
+   * Returns the list of queryids that have at least one plan snapshot.
+   */
+  app.get<{ Params: { id: string } }>(
+    "/api/databases/:id/queries/plan-tracked",
+    { preHandler: [authMiddleware, requireFeature("queryPerformanceEnabled")] },
+    async (request, reply) => {
+      const { id } = request.params;
+      try {
+        const tracked = await db
+          .selectDistinct({ queryid: queryPlanSnapshots.queryid })
+          .from(queryPlanSnapshots)
+          .where(eq(queryPlanSnapshots.monitoredDbId, id));
+
+        return reply.send({ queryids: tracked.map((t) => t.queryid) });
+      } catch (err) {
+        request.log.error({ err }, "Failed to get tracked plan queryids");
+        return reply.status(500).send({ error: "Failed to get tracked plan queryids" });
+      }
+    }
+  );
+
+  /**
    * GET /api/databases/:id/queries/:queryid/plans
    * List plan snapshots for a query (plan regression tracking).
    * Spec §2.10

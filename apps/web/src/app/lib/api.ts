@@ -870,6 +870,17 @@ export interface PlanSnapshot {
   regression: string | null;
 }
 
+export async function getTrackedPlanQueryIds(
+  dbId: string,
+  token?: string,
+): Promise<number[]> {
+  const data = await request<{ queryids: number[] }>(
+    `/api/databases/${dbId}/queries/plan-tracked`,
+    { token },
+  );
+  return data.queryids;
+}
+
 export async function getQueryPlanHistory(
   dbId: string,
   queryid: number,

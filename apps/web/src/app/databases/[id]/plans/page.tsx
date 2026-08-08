@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { getDatabase, getQueryPlanHistory, getQueryCostEstimates } from "../../../lib/api";
+import { getDatabase, getQueryPlanHistory, getQueryCostEstimates, getTrackedPlanQueryIds } from "../../../lib/api";
 import type { Database, PlanSnapshot, QueryCostEstimate } from "../../../lib/api";
 import PlanTreeVisualizer from "../../../components/PlanTreeVisualizer";
 import PlanListView from "../../../components/PlanListView";
@@ -41,15 +41,26 @@ export default function PlansPage() {
   const [pastedPlan, setPastedPlan] = useState<any>(null);
   const [pasteText, setPasteText] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
+  const [trackedIds, setTrackedIds] = useState<Set<number>>(new Set());
 
   const fetchData = useCallback(async () => {
     try {
-      const [db, costData] = await Promise.all([
+      const [db, costData, tracked] = await Promise.all([
         getDatabase(id),
         getQueryCostEstimates(id),
+        getTrackedPlanQueryIds(id).catch(() => []),
       ]);
       setDatabase(db);
-      setQueryList(costData.estimates);
+      const trackedSet = new Set(tracked);
+      setTrackedIds(trackedSet);
+      // Sort: queries with plans first, then by total time
+      const sorted = [...costData.estimates].sort((a, b) => {
+        const aHas = trackedSet.has(a.queryid) ? 1 : 0;
+        const bHas = trackedSet.has(b.queryid) ? 1 : 0;
+        if (aHas !== bHas) return bHas - aHas;
+        return b.totalTimeMs - a.totalTimeMs;
+      });
+      setQueryList(sorted);
     } catch {
       // ignore
     } finally {
@@ -260,37 +271,59 @@ export default function PlansPage() {
             borderBottom: "1px solid var(--border)",
           }}>
             Select a Query ({queryList.length})
+            {trackedIds.size > 0 && (
+              <span style={{
+                display: "block", fontSize: "0.65rem", fontWeight: 400,
+                color: "var(--signal-success)", marginTop: 2,
+              }}>
+                {trackedIds.size} with plan data
+              </span>
+            )}
           </div>
           {queryList.length === 0 ? (
             <div style={{ padding: "var(--space-lg)", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>
               No queries available
             </div>
           ) : (
-            queryList.map((q) => (
-              <button
-                key={q.queryid}
-                onClick={() => setSelectedQueryId(q.queryid)}
-                style={{
-                  display: "block", width: "100%", textAlign: "left",
-                  padding: "var(--space-sm) var(--space-md)",
-                  background: selectedQueryId === q.queryid ? "var(--brand-dim, var(--surface-alt))" : "transparent",
-                  border: "none", borderBottom: "1px solid var(--border)",
-                  cursor: "pointer", transition: "background 0.15s",
-                  borderLeft: selectedQueryId === q.queryid ? "3px solid var(--brand)" : "3px solid transparent",
-                }}
-              >
-                <code style={{
-                  fontSize: "0.75rem", fontFamily: "var(--font-mono)",
-                  color: "var(--text-primary)", display: "block",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {q.queryText.slice(0, 60)}
-                </code>
-                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                  {q.calls.toLocaleString()} calls · {q.totalTimeMs.toFixed(0)}ms total
-                </span>
-              </button>
-            ))
+            queryList.map((q) => {
+              const hasPlan = trackedIds.has(q.queryid);
+              return (
+                <button
+                  key={q.queryid}
+                  onClick={() => setSelectedQueryId(q.queryid)}
+                  style={{
+                    display: "block", width: "100%", textAlign: "left",
+                    padding: "var(--space-sm) var(--space-md)",
+                    background: selectedQueryId === q.queryid ? "var(--brand-dim, var(--surface-alt))" : "transparent",
+                    border: "none", borderBottom: "1px solid var(--border)",
+                    cursor: "pointer", transition: "background 0.15s",
+                    borderLeft: selectedQueryId === q.queryid ? "3px solid var(--brand)" : "3px solid transparent",
+                    opacity: hasPlan ? 1 : 0.5,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {hasPlan && (
+                      <span style={{
+                        width: 6, height: 6, borderRadius: "50%",
+                        background: "var(--signal-success, #10b981)", flexShrink: 0,
+                        boxShadow: "0 0 6px rgba(16, 185, 129, 0.5)",
+                      }} />
+                    )}
+                    <code style={{
+                      fontSize: "0.75rem", fontFamily: "var(--font-mono)",
+                      color: "var(--text-primary)", display: "block",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      flex: 1,
+                    }}>
+                      {q.queryText.slice(0, 60)}
+                    </code>
+                  </div>
+                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                    {q.calls.toLocaleString()} calls · {q.totalTimeMs.toFixed(0)}ms total
+                  </span>
+                </button>
+              );
+            })
           )}
         </div>
 
