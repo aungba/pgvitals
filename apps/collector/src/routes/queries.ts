@@ -5,7 +5,7 @@ import { decrypt } from "../lib/encryption.js";
 import { config } from "../config.js";
 import { checkPgStatStatements } from "../collector/query-stats-collector.js";
 import { captureExplain } from "../collector/explain-capture.js";
-import { authMiddleware } from "../middleware/auth.js";
+import { authMiddleware, requireRole } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
 import { estimateQueryCosts } from "../lib/cost-model.js";
 
@@ -422,7 +422,7 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post<{ Params: { id: string; sugId: string } }>(
     "/api/databases/:id/query-suggestions/:sugId/dismiss",
-    { preHandler: [authMiddleware, requireFeature('queryPerformanceEnabled')] },
+    { preHandler: [authMiddleware, requireRole('owner', 'admin'), requireFeature('queryPerformanceEnabled')] },
     async (request, reply) => {
       try {
         const { id, sugId } = request.params;

@@ -134,6 +134,23 @@ export default async function orgRoutes(app: FastifyInstance): Promise<void> {
           return reply.status(403).send({ error: "Insufficient permissions" });
         }
 
+        // Enforce team member limits per plan tier
+        // Spec §3: Free/Pro = 1 member, Team = unlimited
+        const maxMembers = request.auth.planTier === "team" ? Infinity : 1;
+        const existingMembers = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.orgId, request.auth.orgId));
+
+        if (existingMembers.length >= maxMembers) {
+          return reply.status(403).send({
+            error: `Your ${request.auth.planTier} plan allows up to ${maxMembers} team member(s). Upgrade to Team to invite more.`,
+            code: "TEAM_LIMIT_EXCEEDED",
+            currentCount: existingMembers.length,
+            limit: maxMembers,
+          });
+        }
+
         // Check if user already exists in this org
         const [existing] = await db
           .select({ id: users.id })

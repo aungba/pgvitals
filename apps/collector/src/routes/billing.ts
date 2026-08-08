@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { db, organizations } from "@pgvitals/db";
 import { eq } from "drizzle-orm";
 import { config } from "../config.js";
-import { authMiddleware } from "../middleware/auth.js";
+import { authMiddleware, requireRole } from "../middleware/auth.js";
 
 /* ===================================================================
    Billing Routes — Stripe checkout, portal, webhooks
@@ -20,7 +20,7 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
    */
   app.get(
     "/api/billing/status",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware, requireRole('owner')] },
     async (request, reply) => {
       try {
         const { orgId, planTier } = request.auth;
@@ -52,7 +52,7 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
    */
   app.post<{ Body: { priceId: string; successUrl: string; cancelUrl: string } }>(
     "/api/billing/checkout",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware, requireRole('owner')] },
     async (request, reply) => {
       const stripe = getStripe();
       if (!stripe) {
@@ -115,7 +115,7 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
    */
   app.post<{ Body: { returnUrl: string } }>(
     "/api/billing/portal",
-    { preHandler: [authMiddleware] },
+    { preHandler: [authMiddleware, requireRole('owner')] },
     async (request, reply) => {
       const stripe = getStripe();
       if (!stripe) {
