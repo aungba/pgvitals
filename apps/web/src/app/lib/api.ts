@@ -94,6 +94,7 @@ class ApiError extends Error {
     this.name = "ApiError";
   }
 }
+import { getGlobalToken } from "./useApiToken";
 
 async function request<T>(
   path: string,
@@ -107,18 +108,11 @@ async function request<T>(
     headers["Content-Type"] = "application/json";
   }
 
-  // Use provided token, or auto-fetch from Clerk if available
+  // Use provided token, or auto-fetch from global Clerk token getter
   let token = options?.token;
-  if (!token && typeof window !== "undefined") {
+  if (!token) {
     try {
-      const clerk = (window as any).__clerk_frontend_api
-        ? (window as any).Clerk
-        : (await import("@clerk/nextjs")).useClerk?.() ?? null;
-      // Simpler approach: use the Clerk global instance
-      const clerkInstance = (window as any).Clerk;
-      if (clerkInstance?.session) {
-        token = await clerkInstance.session.getToken() ?? undefined;
-      }
+      token = (await getGlobalToken()) ?? undefined;
     } catch {
       // Clerk not available — continue without token (dev mode)
     }

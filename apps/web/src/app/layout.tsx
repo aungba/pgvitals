@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import Sidebar from "./components/Sidebar";
+import AuthTokenProvider from "./components/AuthTokenProvider";
 
 export const metadata: Metadata = {
   title: "PG Vitals — PostgreSQL Monitoring",
@@ -36,10 +37,12 @@ export default function RootLayout({
           />
         </head>
         <body>
-          <div className="app-layout">
-            <Sidebar />
-            <main className="main-content">{children}</main>
-          </div>
+          <AuthTokenProvider>
+            <div className="app-layout">
+              <Sidebar />
+              <main className="main-content">{children}</main>
+            </div>
+          </AuthTokenProvider>
         </body>
       </html>
     </ClerkProvider>
