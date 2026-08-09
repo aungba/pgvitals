@@ -53,6 +53,11 @@ pipeline {
                     args '-u root'
                 }
             }
+            environment {
+                // Store pnpm cache inside the container (not in Jenkins workspace)
+                // to avoid root-owned files causing permission errors
+                PNPM_STORE_DIR = '/tmp/.pnpm-store'
+            }
             steps {
                 unstash 'source'
 
@@ -64,19 +69,15 @@ pipeline {
                 '''
 
                 echo 'Running automated test suite...'
-                sh '''
-                    corepack enable
-                    pnpm test
-                '''
+                sh 'pnpm test'
 
                 echo 'Building Collector and Web applications...'
                 sh '''
-                    corepack enable
                     pnpm --filter @pgvitals/collector build
                     pnpm --filter @pgvitals/web build
                 '''
 
-                stash includes: '**', excludes: 'node_modules/**,.git/**', name: 'build'
+                stash includes: '**', excludes: 'node_modules/**,.git/**,.pnpm-store/**', name: 'build'
             }
         }
 
