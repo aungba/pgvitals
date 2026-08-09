@@ -1,9 +1,8 @@
 /**
- * Global token store — a simple module-level variable that holds
- * a reference to the Clerk getToken function.
+ * Global token store — provides Clerk JWT tokens for API calls.
  *
- * Set by AuthTokenProvider (client component inside ClerkProvider).
- * Read by api.ts request() to auto-attach Bearer tokens.
+ * Primary: token getter registered by AuthTokenProvider (via useAuth hook)
+ * Fallback: window.Clerk SDK (available after Clerk loads client-side)
  *
  * This file intentionally has NO "use client" directive so it can be
  * imported by both client and non-client modules.
@@ -16,6 +15,27 @@ export function setGlobalTokenGetter(getter: (() => Promise<string | null>) | nu
 }
 
 export async function getGlobalToken(): Promise<string | null> {
-  if (globalTokenGetter) return globalTokenGetter();
+  // Primary path: use the registered getter from useAuth()
+  if (globalTokenGetter) {
+    try {
+      return await globalTokenGetter();
+    } catch {
+      // fall through to fallback
+    }
+  }
+
+  // Fallback: try window.Clerk directly (works once Clerk JS has loaded)
+  if (typeof window !== "undefined") {
+    try {
+      const clerk = (window as any).Clerk;
+      if (clerk?.session) {
+        const token = await clerk.session.getToken();
+        return token ?? null;
+      }
+    } catch {
+      // Clerk not ready yet
+    }
+  }
+
   return null;
 }

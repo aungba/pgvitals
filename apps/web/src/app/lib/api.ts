@@ -118,11 +118,16 @@ async function request<T>(
     }
   }
 
-  // If no token is available yet (Clerk still loading), wait and retry
-  // This handles the race condition on initial page load / hard refresh
-  if (!token && typeof window !== "undefined") {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      await new Promise((r) => setTimeout(r, 500));
+  // If no token yet and Clerk is configured, wait for it to load.
+  // window.Clerk becomes available once the Clerk JS bundle loads,
+  // which may be after the first React render cycle.
+  const clerkConfigured = typeof window !== "undefined" &&
+    !!(window as any).__clerk_publishable_key ||
+    !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+  if (!token && clerkConfigured) {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await new Promise((r) => setTimeout(r, 300));
       try {
         token = (await getGlobalToken()) ?? undefined;
       } catch {
