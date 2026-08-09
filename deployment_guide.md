@@ -253,16 +253,69 @@ pnpm --version
 > **Switch to the `pgvitals` user** — all remaining steps run as `pgvitals`.
 
 > [!TIP]
-> **Using Jenkins CI/CD?** Skip this step. The included [`Jenkinsfile`](Jenkinsfile) builds on the Jenkins server, then deploys to your Azure VM via SSH. Setup:
-> 1. **Install Jenkins plugins:** `SSH Agent`, `Pipeline`, `Git`
-> 2. **Add SSH key to Jenkins:** Go to Jenkins → Manage Jenkins → Credentials → Add Credentials:
->    - Kind: **SSH Username with private key**
->    - ID: `pgvitals-production-ssh`
->    - Username: `pgvitals`
->    - Private Key: paste the private key that can SSH into your Azure VM
-> 3. **Add GitHub credentials:** same page, add your GitHub token with ID `github-credentials`
-> 4. **Create pipeline:** New Item → Pipeline → set Definition to "Pipeline script from SCM" → Git → your repo URL
-> 5. Set up `.env` files on the Azure VM (steps 7–8) — then Jenkins handles steps 6, 10–13 on each push
+> **Using Jenkins CI/CD?** Skip the `git clone` below. The included [`Jenkinsfile`](Jenkinsfile) builds on the Jenkins server, then deploys to your Azure VM via SSH. Follow the setup below, then jump to step 7.
+
+### 6.1 Jenkins CI/CD Setup (alternative to manual clone)
+
+#### Generate a GitHub Personal Access Token
+
+1. Go to **https://github.com/settings/tokens**
+2. Click **"Generate new token"** → **"Fine-grained token"**
+3. Configure:
+   - **Token name:** `jenkins-pgvitals`
+   - **Expiration:** 90 days (or custom)
+   - **Repository access:** "Only select repositories" → select `pgvitals`
+   - **Permissions:**
+     - **Contents:** Read-only (for git clone)
+     - **Webhooks:** Read and write (for auto-trigger on push)
+4. Click **"Generate token"** → **copy it immediately** (you won't see it again)
+
+#### Install Jenkins Plugins
+
+Go to Jenkins → Manage Jenkins → Manage Plugins → Available, install:
+- **SSH Agent** — for SSH deployment to the Azure VM
+- **Pipeline** — for Jenkinsfile support
+- **Git** — for GitHub checkout
+
+#### Add Credentials to Jenkins
+
+Go to Jenkins → Manage Jenkins → Credentials → (global) → Add Credentials:
+
+**1. GitHub credentials:**
+
+| Field | Value |
+|-------|-------|
+| Kind | Username with password |
+| Username | your GitHub username |
+| Password | paste the token from above |
+| ID | `github-credentials` |
+
+**2. SSH key for Azure VM:**
+
+| Field | Value |
+|-------|-------|
+| Kind | SSH Username with private key |
+| ID | `pgvitals-production-ssh` |
+| Username | `pgvitals` |
+| Private Key | Enter directly → paste the private key that can SSH into your Azure VM |
+
+> [!NOTE]
+> The SSH key must correspond to a public key in `/home/pgvitals/.ssh/authorized_keys` on the Azure VM (set up in step 3.4).
+
+#### Create the Jenkins Pipeline
+
+1. Jenkins → **New Item** → enter name `pgvitals` → select **Pipeline** → OK
+2. Under **Pipeline**:
+   - Definition: **Pipeline script from SCM**
+   - SCM: **Git**
+   - Repository URL: `https://github.com/aungba/pgvitals.git`
+   - Credentials: select `github-credentials`
+   - Branch: `*/main`
+   - Script Path: `Jenkinsfile`
+3. Under **Build Triggers**: check **GitHub hook trigger for GITScm polling**
+4. Click **Save** → **Build Now** to test
+
+> After this one-time setup, every `git push` to `main` triggers: checkout → test → build → rsync to Azure VM → migrate → PM2 restart → health check.
 
 ```bash
 # Switch to pgvitals user (all steps from here use this user)
