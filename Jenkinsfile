@@ -93,20 +93,20 @@ pipeline {
                 unstash 'build'
 
                 echo "Deploying to ${env.DEPLOY_HOST}..."
-                sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
+                withCredentials([sshUserPrivateKey(credentialsId: env.DEPLOY_SSH_CREDENTIALS_ID, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
                     // 1. Sync build artifacts to production server (preserving .env files)
                     sh """
                         rsync -az --delete \
                           --exclude '.git' \
                           --exclude 'node_modules' \
                           --exclude '.env' \
-                          -e 'ssh -o StrictHostKeyChecking=no' \
+                          -e 'ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no' \
                           ./ ${env.DEPLOY_USER}@${env.DEPLOY_HOST}:${env.APP_DIR}/
                     """
 
                     // 2. Install production dependencies on the remote server
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
+                        ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
                             corepack enable || true
@@ -116,7 +116,7 @@ pipeline {
 
                     // 3. Run database migrations on the remote server
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
+                        ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
                             pnpm db:migrate
@@ -125,7 +125,7 @@ pipeline {
 
                     // 4. Restart PM2 services on the remote server
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
+                        ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
                             pm2 restart pgvitals-collector || pm2 start ecosystem.config.cjs --only pgvitals-collector
@@ -141,9 +141,9 @@ pipeline {
             agent any
             steps {
                 echo 'Verifying application health...'
-                sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
+                withCredentials([sshUserPrivateKey(credentialsId: env.DEPLOY_SSH_CREDENTIALS_ID, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
+                        ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             echo "Checking Collector API health..."
                             curl -sf http://localhost:3001/health || (echo "Collector health check failed!" && exit 1)
 
