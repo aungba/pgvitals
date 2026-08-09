@@ -346,10 +346,11 @@ nano /opt/pgvitals/.env
 
 Copy the `.env` file to where each app needs it:
 
-> [!IMPORTANT]
-> These subdirectories only exist **after the repo is cloned** (step 6) or **after the first Jenkins build**. Run this after the repo is in place:
-
 ```bash
+# Pre-create directories so .env files are ready before the first build/clone
+mkdir -p /opt/pgvitals/apps/collector
+mkdir -p /opt/pgvitals/packages/db
+
 cp /opt/pgvitals/.env /opt/pgvitals/apps/collector/.env
 cp /opt/pgvitals/.env /opt/pgvitals/packages/db/.env
 ```
