@@ -104,13 +104,13 @@ pipeline {
                           ./ ${env.DEPLOY_USER}@${env.DEPLOY_HOST}:${env.APP_DIR}/
                     """
 
-                    // 2. Install production dependencies on the remote server
+                    // 2. Install dependencies on the remote server (includes tsx for migrations)
                     sh """
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
                             corepack enable || true
-                            pnpm install --frozen-lockfile --prod || pnpm install --frozen-lockfile --prod --ignore-scripts
+                            pnpm install --frozen-lockfile || pnpm install --frozen-lockfile --ignore-scripts
                         '
                     """
 
