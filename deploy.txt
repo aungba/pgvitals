@@ -10,6 +10,8 @@ Timeout set to expire in 15 min
 [Pipeline] node
 Running on Jenkins in /var/lib/jenkins/workspace/PG_vital
 [Pipeline] {
+[Pipeline] sh
++ rm -rf .pnpm-store node_modules
 [Pipeline] echo
 Checking out branch 'main' from GitHub...
 [Pipeline] checkout
@@ -27,13 +29,13 @@ using GIT_ASKPASS to set credentials
  > git config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/* # timeout=10
 Avoid second fetch
  > git rev-parse refs/remotes/origin/main^{commit} # timeout=10
-Checking out Revision 20e25b260969b6f054449e2c4da9cdf07e07c58c (refs/remotes/origin/main)
+Checking out Revision c472eb2469e8e91428b7c2eba0c6370ec2590395 (refs/remotes/origin/main)
  > git config core.sparsecheckout # timeout=10
- > git checkout -f 20e25b260969b6f054449e2c4da9cdf07e07c58c # timeout=10
-Commit message: "fix: pnpm store permission error in Docker agent"
+ > git checkout -f c472eb2469e8e91428b7c2eba0c6370ec2590395 # timeout=10
+Commit message: "fix: inline PNPM_STORE_DIR + handle ignored builds error"
  > git rev-list --no-walk 20e25b260969b6f054449e2c4da9cdf07e07c58c # timeout=10
 [Pipeline] stash
-Stashed 154 file(s)
+Stashed 156 file(s)
 [Pipeline] }
 [Pipeline] // node
 [Pipeline] }
@@ -53,15 +55,14 @@ Running on Jenkins in /var/lib/jenkins/workspace/PG_vital
 [Pipeline] // withEnv
 [Pipeline] withDockerContainer
 Jenkins does not seem to be running inside a container
-$ docker run -t -d -u 110:114 -u root -w /var/lib/jenkins/workspace/PG_vital -v /var/lib/jenkins/workspace/PG_vital:/var/lib/jenkins/workspace/PG_vital:rw,z -v /var/lib/jenkins/workspace/PG_vital@tmp:/var/lib/jenkins/workspace/PG_vital@tmp:rw,z -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** node:22-slim cat
-$ docker top a716d43811079118b8e5bdf489ae26b46358fd47d875325d75f79ffe17e50a3f -eo pid,comm
-[Pipeline] {
-[Pipeline] withEnv
+$ docker run -t -d -u 110:114 -u root -e PNPM_STORE_DIR=/tmp/.pnpm-store -w /var/lib/jenkins/workspace/PG_vital -v /var/lib/jenkins/workspace/PG_vital:/var/lib/jenkins/workspace/PG_vital:rw,z -v /var/lib/jenkins/workspace/PG_vital@tmp:/var/lib/jenkins/workspace/PG_vital@tmp:rw,z -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** node:22-slim cat
+$ docker top e1f26dd93ca0f146447d30d3b4358bf9c2abc232417435cce6cfa537828a54f4 -eo pid,comm
 [Pipeline] {
 [Pipeline] unstash
 [Pipeline] echo
 Installing pnpm and dependencies...
 [Pipeline] sh
++ export PNPM_STORE_DIR=/tmp/.pnpm-store
 + corepack enable
 + corepack prepare pnpm@latest --activate
 Preparing pnpm@latest for immediate activation...
@@ -73,15 +74,15 @@ Progress: resolved 1, reused 0, downloaded 0, added 0
 Packages: +222
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 Progress: resolved 222, reused 0, downloaded 0, added 0
-Progress: resolved 222, reused 0, downloaded 49, added 0
-Progress: resolved 222, reused 0, downloaded 61, added 0
-Progress: resolved 222, reused 0, downloaded 62, added 0
-✓ Lockfile passes supply-chain policies (352 entries in 4.5s)
+Progress: resolved 222, reused 0, downloaded 45, added 0
+Progress: resolved 222, reused 0, downloaded 56, added 0
 Packages are hard linked from the content-addressable store to the virtual store.
   Content-addressable store is at: /var/lib/jenkins/workspace/PG_vital/.pnpm-store/v11
   Virtual store is at:             node_modules/.pnpm
-Progress: resolved 222, reused 0, downloaded 122, added 4
-Progress: resolved 222, reused 0, downloaded 189, added 12
+Progress: resolved 222, reused 0, downloaded 63, added 1
+✓ Lockfile passes supply-chain policies (352 entries in 4.6s)
+Progress: resolved 222, reused 0, downloaded 108, added 4
+Progress: resolved 222, reused 0, downloaded 171, added 8
 Progress: resolved 222, reused 0, downloaded 222, added 222, done
 
 devDependencies:
@@ -90,11 +91,50 @@ devDependencies:
 [ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: esbuild@0.18.20, esbuild@0.25.12, esbuild@0.28.1, msgpackr-extract@3.0.4, sharp@0.34.5
 
 Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
++ pnpm install --frozen-lockfile --ignore-scripts
+Scope: all 4 workspace projects
+✓ Lockfile passes supply-chain policies (verified 3s ago)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+Done in 900ms using pnpm v11.21.0
+[Pipeline] echo
+Running automated test suite...
+[Pipeline] sh
++ export PNPM_STORE_DIR=/tmp/.pnpm-store
++ pnpm test
+$ vitest run
+[33m(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.[39m
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90m/var/lib/jenkins/workspace/PG_vital[39m
+
+ [32m✓[39m apps/collector/tests/fingerprint.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/redact-query.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/cost-model.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/safe-query.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/encryption.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m      Tests [22m [1m[32m80 passed[39m[22m[90m (80)[39m
+[2m   Start at [22m 15:28:45
+[2m   Duration [22m 893ms[2m (transform 107ms, setup 0ms, import 179ms, tests 44ms, environment 1ms)[22m
+
+[Pipeline] echo
+Building Collector and Web applications...
+[Pipeline] sh
++ export PNPM_STORE_DIR=/tmp/.pnpm-store
++ pnpm --filter @pgvitals/collector build
+$ tsc
+src/collector/plan-regression-collector.ts(416,36): error TS2339: Property 'rows' does not exist on type 'RowList<Record<string, unknown>[]>'.
+src/collector/plan-regression-collector.ts(466,34): error TS2339: Property 'rows' does not exist on type 'RowList<Record<string, unknown>[]>'.
+/var/lib/jenkins/workspace/PG_vital/apps/collector:
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @pgvitals/collector@0.1.0 build: `tsc`
+Exit status 2
 [Pipeline] }
-[Pipeline] // withEnv
-[Pipeline] }
-$ docker stop --time=1 a716d43811079118b8e5bdf489ae26b46358fd47d875325d75f79ffe17e50a3f
-$ docker rm -f --volumes a716d43811079118b8e5bdf489ae26b46358fd47d875325d75f79ffe17e50a3f
+$ docker stop --time=1 e1f26dd93ca0f146447d30d3b4358bf9c2abc232417435cce6cfa537828a54f4
+$ docker rm -f --volumes e1f26dd93ca0f146447d30d3b4358bf9c2abc232417435cce6cfa537828a54f4
 [Pipeline] // withDockerContainer
 [Pipeline] }
 [Pipeline] // node
@@ -123,5 +163,5 @@ Stage "Verify Health" skipped due to earlier failure(s)
 [Pipeline] }
 [Pipeline] // withEnv
 [Pipeline] End of Pipeline
-ERROR: script returned exit code 1
+ERROR: script returned exit code 2
 Finished: FAILURE

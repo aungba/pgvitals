@@ -413,7 +413,7 @@ async function findRegressionTriggerQueries(
       LIMIT 20
     `);
 
-    const results = (regressedRows.rows ?? regressedRows) as Array<{
+    const results = regressedRows as unknown as Array<{
       queryid: string | number;
       query_text: string;
       curr_mean: number;
@@ -463,7 +463,7 @@ async function findSeqScanFlaggedQueries(
       LIMIT 20
     `);
 
-    const results = (flaggedRows.rows ?? flaggedRows) as Array<{
+    const results = flaggedRows as unknown as Array<{
       queryid: string | number;
       query_text: string;
     }>;
