@@ -1,5 +1,5 @@
 pipeline {
-    agent any
+    agent none
 
     // Define build parameters for flexible branch selection (default: main)
     parameters {
@@ -17,7 +17,7 @@ pipeline {
 
         // Jenkins Credentials Manager IDs
         GITHUB_CREDENTIALS_ID = 'github-credentials'
-        // SSH credentials for the production Azure VM (add via Jenkins → Credentials → SSH Username with private key)
+        // SSH credentials for the production Azure VM
         DEPLOY_SSH_CREDENTIALS_ID = 'pgvitals-production-ssh'
         // Production server hostname
         DEPLOY_HOST = 'pgva.japaneast.cloudapp.azure.com'
@@ -31,6 +31,7 @@ pipeline {
 
     stages {
         stage('Checkout GitHub Repository') {
+            agent any
             steps {
                 echo "Checking out branch '${params.BRANCH_NAME}' from GitHub..."
                 checkout([
@@ -41,39 +42,49 @@ pipeline {
                         credentialsId: "${env.GITHUB_CREDENTIALS_ID}"
                     ]]
                 ])
+                stash includes: '**', name: 'source'
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Build & Test') {
+            agent {
+                docker {
+                    image 'node:22-slim'
+                    args '-u root'
+                }
+            }
             steps {
+                unstash 'source'
+
                 echo 'Installing pnpm and dependencies...'
                 sh '''
-                    corepack enable || true
-                    corepack prepare pnpm@latest --activate || true
+                    corepack enable
+                    corepack prepare pnpm@latest --activate
                     pnpm install --frozen-lockfile
                 '''
-            }
-        }
 
-        stage('Run Tests') {
-            steps {
                 echo 'Running automated test suite...'
-                sh 'pnpm test'
-            }
-        }
+                sh '''
+                    corepack enable
+                    pnpm test
+                '''
 
-        stage('Build Applications') {
-            steps {
                 echo 'Building Collector and Web applications...'
                 sh '''
+                    corepack enable
                     pnpm --filter @pgvitals/collector build
                     pnpm --filter @pgvitals/web build
                 '''
+
+                stash includes: '**', excludes: 'node_modules/**,.git/**', name: 'build'
             }
         }
 
         stage('Deploy to Production') {
+            agent any
             steps {
+                unstash 'build'
+
                 echo "Deploying to ${env.DEPLOY_HOST}..."
                 sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
                     // 1. Sync build artifacts to production server (preserving .env files)
@@ -120,6 +131,7 @@ pipeline {
         }
 
         stage('Verify Health') {
+            agent any
             steps {
                 echo 'Verifying application health...'
                 sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
@@ -143,13 +155,6 @@ pipeline {
         }
         failure {
             echo "✗ PG Vitals deployment failed for branch '${params.BRANCH_NAME}'."
-        }
-        always {
-            sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
-                sh """
-                    ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} 'pm2 status' || true
-                """
-            }
         }
     }
 }
