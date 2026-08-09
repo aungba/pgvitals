@@ -33,8 +33,8 @@ pipeline {
         stage('Checkout GitHub Repository') {
             agent any
             steps {
-                // Clean workspace to remove root-owned files from previous Docker builds
-                sh 'rm -rf .pnpm-store node_modules || true'
+                // Clean root-owned files from previous Docker builds
+                sh 'docker run --rm -v "$WORKSPACE:/ws" alpine sh -c "rm -rf /ws/.pnpm-store /ws/node_modules" || true'
 
                 echo "Checking out branch '${params.BRANCH_NAME}' from GitHub..."
                 checkout([
