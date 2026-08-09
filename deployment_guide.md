@@ -312,6 +312,17 @@ Go to Jenkins → Manage Jenkins → Credentials → (global) → Add Credential
 #### Create the Jenkins Pipeline
 
 1. Jenkins → **New Item** → enter name `pgvitals` → select **Pipeline** → OK
+
+**Option A — Paste Jenkinsfile directly (simpler):**
+
+2. Under **Pipeline**:
+   - Definition: **Pipeline script**
+   - Script: copy and paste the contents of [`Jenkinsfile`](Jenkinsfile) from the repo
+3. Under **Build Triggers**: check **GitHub hook trigger for GITScm polling**
+4. Click **Save** → **Build Now** to test
+
+**Option B — Load Jenkinsfile from repo (auto-updates):**
+
 2. Under **Pipeline**:
    - Definition: **Pipeline script from SCM**
    - SCM: **Git**
@@ -321,6 +332,9 @@ Go to Jenkins → Manage Jenkins → Credentials → (global) → Add Credential
    - Script Path: `Jenkinsfile`
 3. Under **Build Triggers**: check **GitHub hook trigger for GITScm polling**
 4. Click **Save** → **Build Now** to test
+
+> [!TIP]
+> **Option A** is easier to get started — just paste and go. **Option B** automatically picks up Jenkinsfile changes when you push to the repo.
 
 > After this one-time setup, every `git push` to `main` triggers: checkout → test → build → rsync to Azure VM → migrate → PM2 restart → health check.
 
