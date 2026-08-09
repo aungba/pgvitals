@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { db, queryStats, queryPlanSnapshots, monitoredDatabases } from "@pgvitals/db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, gt, sql, ne, isNotNull } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
 import { safeQuery } from "../lib/safe-query.js";
 import { config } from "../config.js";
@@ -136,7 +136,7 @@ export async function collectPlanSnapshots(
     return hints;
   }
 
-  const topQueries = await db
+   const topQueries = await db
     .select({
       queryid: queryStats.queryid,
       queryText: queryStats.queryText,
@@ -150,6 +150,30 @@ export async function collectPlanSnapshots(
     )
     .orderBy(desc(queryStats.totalTimeMs))
     .limit(20);
+
+  // ── Auto-trigger: find queries with mean_time regression >30% ──
+  // Compare latest two query_stats captures to detect regressions
+  const autoTriggerQueries = await findRegressionTriggerQueries(
+    monitoredDbId,
+    latestCapture.capturedAt,
+    log
+  );
+
+  // Also auto-trigger for queries with known seq_scan flags from prior snapshots
+  const seqScanFlaggedQueries = await findSeqScanFlaggedQueries(
+    monitoredDbId,
+    latestCapture.capturedAt,
+    log
+  );
+
+  // Merge: add auto-triggered queries that aren't already in top 20
+  const topQueryIds = new Set(topQueries.map((q) => q.queryid));
+  for (const q of [...autoTriggerQueries, ...seqScanFlaggedQueries]) {
+    if (!topQueryIds.has(q.queryid)) {
+      topQueries.push(q);
+      topQueryIds.add(q.queryid);
+    }
+  }
 
   if (topQueries.length === 0) return hints;
 
@@ -332,4 +356,131 @@ export async function collectPlanSnapshots(
 
   log.info({ monitoredDbId, capturedCount }, "Plan snapshots collected");
   return hints;
+}
+
+/* ===================================================================
+   Auto-EXPLAIN Trigger Functions — spec §2.3
+   
+   These identify queries that should get an EXPLAIN capture even if
+   they're not in the top 20 by total time.
+   =================================================================== */
+
+/**
+ * Find queries whose mean_time has regressed >30% between the two
+ * most recent query_stats captures.
+ */
+async function findRegressionTriggerQueries(
+  monitoredDbId: string,
+  latestCapturedAt: Date,
+  log: FastifyBaseLogger
+): Promise<Array<{ queryid: number; queryText: string }>> {
+  try {
+    // Get the second-latest capture time
+    const prevCaptures = await db
+      .select({ capturedAt: queryStats.capturedAt })
+      .from(queryStats)
+      .where(
+        and(
+          eq(queryStats.monitoredDbId, monitoredDbId),
+          ne(queryStats.capturedAt, latestCapturedAt)
+        )
+      )
+      .orderBy(desc(queryStats.capturedAt))
+      .limit(1);
+
+    if (prevCaptures.length === 0) return [];
+
+    const prevCapturedAt = prevCaptures[0].capturedAt;
+
+    // Join latest vs previous stats, find queries where mean_time increased >30%
+    const regressedRows = await db.execute(sql`
+      SELECT
+        curr.queryid,
+        curr.query_text,
+        curr.mean_time_ms AS curr_mean,
+        prev.mean_time_ms AS prev_mean
+      FROM query_stats curr
+      JOIN query_stats prev
+        ON curr.queryid = prev.queryid
+        AND curr.monitored_db_id = prev.monitored_db_id
+      WHERE curr.monitored_db_id = ${monitoredDbId}
+        AND curr.captured_at = ${latestCapturedAt}
+        AND prev.captured_at = ${prevCapturedAt}
+        AND prev.mean_time_ms > 0
+        AND curr.mean_time_ms > prev.mean_time_ms * 1.3
+        AND curr.calls > 10
+      ORDER BY (curr.mean_time_ms - prev.mean_time_ms) DESC
+      LIMIT 20
+    `);
+
+    const results = (regressedRows.rows ?? regressedRows) as Array<{
+      queryid: string | number;
+      query_text: string;
+      curr_mean: number;
+      prev_mean: number;
+    }>;
+
+    if (results.length > 0) {
+      log.info(
+        { monitoredDbId, count: results.length },
+        "Auto-trigger: queries with >30% mean_time regression"
+      );
+    }
+
+    return results.map((r) => ({
+      queryid: typeof r.queryid === "string" ? parseInt(r.queryid, 10) : r.queryid,
+      queryText: r.query_text,
+    }));
+  } catch (err) {
+    log.debug({ err }, "Failed to find regression trigger queries");
+    return [];
+  }
+}
+
+/**
+ * Find queries that have prior plan snapshots flagged with seq_scan_large_table.
+ * These should be re-captured to check if the seq scan persists.
+ */
+async function findSeqScanFlaggedQueries(
+  monitoredDbId: string,
+  latestCapturedAt: Date,
+  log: FastifyBaseLogger
+): Promise<Array<{ queryid: number; queryText: string }>> {
+  try {
+    // Find queryids that had seq_scan_large_table in their latest plan snapshot
+    const flaggedRows = await db.execute(sql`
+      SELECT DISTINCT ON (qps.queryid)
+        qps.queryid,
+        qs.query_text
+      FROM query_plan_snapshots qps
+      JOIN query_stats qs
+        ON qs.queryid = qps.queryid
+        AND qs.monitored_db_id = qps.monitored_db_id
+        AND qs.captured_at = ${latestCapturedAt}
+      WHERE qps.monitored_db_id = ${monitoredDbId}
+        AND qps.plan_flags->>'seq_scan_large_table' = 'true'
+      ORDER BY qps.queryid, qps.captured_at DESC
+      LIMIT 20
+    `);
+
+    const results = (flaggedRows.rows ?? flaggedRows) as Array<{
+      queryid: string | number;
+      query_text: string;
+    }>;
+
+    if (results.length > 0) {
+      log.info(
+        { monitoredDbId, count: results.length },
+        "Auto-trigger: queries with seq_scan_large_table flag"
+      );
+    }
+
+    return results.map((r) => ({
+      queryid: typeof r.queryid === "string" ? parseInt(r.queryid, 10) : r.queryid,
+      queryText: r.query_text,
+    }));
+  } catch (err) {
+    log.debug({ err }, "Failed to find seq scan flagged queries");
+    return [];
+  }
 }

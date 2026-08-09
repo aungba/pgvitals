@@ -6,6 +6,7 @@ import { config } from "../config.js";
 import { scheduleDatabase, unscheduleDatabase } from "../collector/scheduler.js";
 import { authMiddleware, requireRole } from "../middleware/auth.js";
 import { checkDatabaseLimit } from "../middleware/plan-limits.js";
+import { syncSubscriptionQuantity } from "./billing.js";
 
 interface RegisterDatabaseBody {
   name: string;
@@ -79,6 +80,9 @@ export default async function databaseRoutes(app: FastifyInstance): Promise<void
         // Add to the collection schedule
         await scheduleDatabase(newDb.id, newDb.name, request.log);
 
+        // Sync Stripe subscription quantity (per-DB billing)
+        syncSubscriptionQuantity(orgId, request.log).catch(() => {});
+
         return reply.status(201).send({ database: newDb });
       } catch (err) {
         request.log.error({ err }, "Failed to register database");
@@ -151,6 +155,9 @@ export default async function databaseRoutes(app: FastifyInstance): Promise<void
           .where(eq(monitoredDatabases.id, id));
 
         request.log.info({ id, name: existing.name }, "Database deleted");
+
+        // Sync Stripe subscription quantity (per-DB billing)
+        syncSubscriptionQuantity(request.auth.orgId, request.log).catch(() => {});
 
         return reply.send({ success: true, deleted: existing });
       } catch (err) {

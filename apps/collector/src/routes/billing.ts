@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import Stripe from "stripe";
-import { db, organizations } from "@pgvitals/db";
+import { db, organizations, monitoredDatabases } from "@pgvitals/db";
 import { eq } from "drizzle-orm";
 import { config } from "../config.js";
 import { authMiddleware, requireRole } from "../middleware/auth.js";
@@ -93,10 +93,18 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
             .where(eq(organizations.id, orgId));
         }
 
+        // Per-database billing: quantity = number of monitored databases
+        // New subscribers get quantity = current DBs + 1 (the one they'll add next)
+        const existingDbs = await db
+          .select({ id: monitoredDatabases.id })
+          .from(monitoredDatabases)
+          .where(eq(monitoredDatabases.orgId, orgId));
+        const dbQuantity = Math.max(existingDbs.length, 1);
+
         const session = await stripe.checkout.sessions.create({
           customer: customerId,
           mode: "subscription",
-          line_items: [{ price: priceId, quantity: 1 }],
+          line_items: [{ price: priceId, quantity: dbQuantity }],
           success_url: successUrl,
           cancel_url: cancelUrl,
           metadata: { orgId: org.id },
@@ -261,4 +269,56 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
       }
     }
   );
+}
+
+/**
+ * Sync the Stripe subscription quantity with the actual number of
+ * monitored databases. Call this after adding or removing a database.
+ *
+ * Per-database billing: $39/mo (Pro) or $99/mo (Team) per database.
+ */
+export async function syncSubscriptionQuantity(
+  orgId: string,
+  log?: { info: (...args: unknown[]) => void; error: (...args: unknown[]) => void }
+): Promise<void> {
+  const stripe = getStripe();
+  if (!stripe) return;
+
+  try {
+    const [org] = await db
+      .select({
+        stripeSubscriptionId: organizations.stripeSubscriptionId,
+        planTier: organizations.planTier,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+
+    if (!org?.stripeSubscriptionId || org.planTier === "free") return;
+
+    // Count current monitored databases
+    const dbs = await db
+      .select({ id: monitoredDatabases.id })
+      .from(monitoredDatabases)
+      .where(eq(monitoredDatabases.orgId, orgId));
+
+    const newQuantity = Math.max(dbs.length, 1);
+
+    // Get the subscription and update quantity
+    const subscription = await stripe.subscriptions.retrieve(org.stripeSubscriptionId);
+    const itemId = subscription.items.data[0]?.id;
+
+    if (itemId) {
+      await stripe.subscriptionItems.update(itemId, {
+        quantity: newQuantity,
+      });
+
+      log?.info(
+        { orgId, quantity: newQuantity, subscriptionId: org.stripeSubscriptionId },
+        "Stripe subscription quantity synced with database count"
+      );
+    }
+  } catch (err) {
+    log?.error({ err, orgId }, "Failed to sync Stripe subscription quantity");
+  }
 }

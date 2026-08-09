@@ -132,9 +132,9 @@ Choose a VM size based on how many PostgreSQL databases you'll monitor:
 
 ---
 
-## 3. Initial Server Setup
+## 3. Initial Server Setup & Dedicated Deployment User
 
-SSH into your VM and run:
+SSH into your VM as root/sudo user and run:
 
 ```bash
 # Update system packages
@@ -143,16 +143,32 @@ sudo apt update && sudo apt upgrade -y
 # Install essential tools
 sudo apt install -y curl wget git build-essential ca-certificates gnupg lsb-release ufw
 
-# Create a dedicated user (optional but recommended)
+# 3.1 Create a Dedicated Deployment User ('pgvitals')
 sudo adduser pgvitals --disabled-password --gecos ""
 sudo usermod -aG sudo pgvitals
 
-# Set timezone
+# 3.2 Configure Deployment Directory and Ownership
+sudo mkdir -p /opt/pgvitals /var/log/pgvitals
+sudo chown -R pgvitals:pgvitals /opt/pgvitals /var/log/pgvitals
+
+# 3.3 Configure SSH & GitHub Deploy Key (Switch to pgvitals user)
+sudo su - pgvitals
+
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+
+# Generate SSH Deploy Key for GitHub access
+ssh-keygen -t ed25519 -C "deploy@pgvitals-server" -N "" -f ~/.ssh/id_ed25519
+
+# Display public key to register in GitHub (Repository -> Settings -> Deploy keys)
+cat ~/.ssh/id_ed25519.pub
+
+# Set system timezone
 sudo timedatectl set-timezone UTC
 ```
 
-> [!TIP]
-> If you SSH as root, consider configuring SSH key-based authentication and disabling password login for security.
+> [!IMPORTANT]
+> **Dedicated User Best Practice**: Running application processes, PM2, and deployment builds under the `pgvitals` user ensures application execution follows principle of least privilege rather than running as `root`.
 
 ---
 
