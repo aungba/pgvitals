@@ -2,9 +2,9 @@ module.exports = {
   apps: [
     {
       name: 'pgvitals-collector',
-      cwd: './apps/collector',
-      script: 'dist/index.js',
-      node_args: '--env-file=.env',
+      cwd: './',
+      script: 'apps/collector/src/index.ts',
+      interpreter: './node_modules/.bin/tsx',
       instances: 1,
       autorestart: true,
       watch: false,
