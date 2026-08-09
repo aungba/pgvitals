@@ -81,12 +81,12 @@ Create an Ubuntu VM with your preferred cloud provider. Required:
 - **RAM:** 4 GB minimum (8 GB recommended for 10+ monitored databases)
 - **Storage:** 40 GB SSD minimum
 - **Network:** Public IPv4 address
-- **DNS:** Point your domains to the VM's IP address:
-  - `pgvitals.example.com` → VM IP (web dashboard)
-  - `api.pgvitals.example.com` → VM IP (collector API)
+- **DNS:** Point your domain to the VM's public IP address:
+  - e.g. `pgva.japaneast.cloudapp.azure.com` → VM IP
+  - Azure VMs get this automatically via the VM's DNS name label
 
 > [!NOTE]
-> You can use a single domain with path-based routing instead of subdomains. This guide uses subdomains for clarity.
+> This guide uses **single-domain path-based routing** (e.g. `pgva.japaneast.cloudapp.azure.com`). The web dashboard is served at `/` and the collector API at `/api/`. You can also use subdomains if you have a custom domain.
 
 ### 2.1 Sizing Guide
 
@@ -323,11 +323,11 @@ REDIS_URL=redis://:YOUR_REDIS_PASSWORD@localhost:6379
 # Collector
 COLLECTOR_PORT=3001
 POLLING_INTERVAL_MS=10000
-DASHBOARD_BASE_URL=https://pgvitals.example.com
+DASHBOARD_BASE_URL=https://pgva.japaneast.cloudapp.azure.com
 NODE_ENV=production
 
-# Web App
-NEXT_PUBLIC_API_URL=https://api.pgvitals.example.com
+# Web App (same domain — Nginx routes /api/ to the collector)
+NEXT_PUBLIC_API_URL=https://pgva.japaneast.cloudapp.azure.com
 
 # Encryption key (paste the 64-char hex from step 7)
 ENCRYPTION_KEY=paste_your_64_char_hex_key_here
@@ -751,18 +751,40 @@ sudo apt install -y nginx
 
 # Create the site config
 sudo tee /etc/nginx/sites-available/pgvitals << 'NGINX'
-# ==============================
-# PG Vitals — Web Dashboard
-# ==============================
+# ============================================
+# PG Vitals — Single-Domain Path-Based Routing
+# ============================================
 server {
     listen 80;
-    server_name pgvitals.example.com;
+    server_name pgva.japaneast.cloudapp.azure.com;
 
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
+    # Max request body size (for EXPLAIN captures, etc.)
+    client_max_body_size 2M;
+
+    # ── Collector API (/api/) ──
+    # Route all /api/* requests to the Collector (Fastify on port 3001)
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Health check (no auth)
+    location = /health {
+        proxy_pass http://127.0.0.1:3001/health;
+        access_log off;
+    }
+
+    # ── Web Dashboard (everything else) ──
+    # Route all other requests to Next.js (port 3000)
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -778,38 +800,6 @@ server {
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
-    }
-}
-
-# ==============================
-# PG Vitals — Collector API
-# ==============================
-server {
-    listen 80;
-    server_name api.pgvitals.example.com;
-
-    # Security headers
-    add_header X-Frame-Options "DENY" always;
-    add_header X-Content-Type-Options "nosniff" always;
-
-    # Max request body size (for EXPLAIN captures, etc.)
-    client_max_body_size 2M;
-
-    location / {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # CORS is handled by the Fastify app — don't add it here
-    }
-
-    # Health check (no auth)
-    location = /health {
-        proxy_pass http://127.0.0.1:3001/health;
-        access_log off;
     }
 }
 NGINX
@@ -830,10 +820,9 @@ sudo nginx -t && sudo systemctl reload nginx
 # Install Certbot
 sudo apt install -y certbot python3-certbot-nginx
 
-# Obtain SSL certificates (will auto-configure Nginx)
+# Obtain SSL certificate (single domain)
 sudo certbot --nginx \
-  -d pgvitals.example.com \
-  -d api.pgvitals.example.com \
+  -d pgva.japaneast.cloudapp.azure.com \
   --non-interactive \
   --agree-tos \
   -m your-email@example.com
