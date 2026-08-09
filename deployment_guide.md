@@ -360,11 +360,15 @@ Choose **one** of the two options below.
 
 Create a production Docker Compose file:
 
+> [!NOTE]
+> PG Vitals works with **PostgreSQL 16, 17, or 18**. Change the image tag below to match your preferred version (e.g. `latest-pg18`).
+
 ```bash
 cat > /opt/pgvitals/docker-compose.prod.yml << 'EOF'
 services:
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
+    # Supported: latest-pg16, latest-pg17, latest-pg18
+    image: timescale/timescaledb:latest-pg18
     container_name: pgvitals-timescaledb
     restart: always
     ports:
@@ -440,8 +444,11 @@ pgvitals-redis          running (healthy)        127.0.0.1:6379->6379/tcp
 
 #### 9B.1 Install TimescaleDB
 
+> [!NOTE]
+> PG Vitals works with **PostgreSQL 16, 17, or 18**. Replace `18` below with your preferred version.
+
 ```bash
-# Add PostgreSQL 16 repository
+# Add PostgreSQL repository
 sudo apt install -y gnupg postgresql-common apt-transport-https
 sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
 
@@ -451,9 +458,9 @@ echo "deb https://packagecloud.io/timescale/timescaledb/ubuntu/ $(lsb_release -c
 curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey | \
   sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/timescaledb.gpg
 
-# Install TimescaleDB for PostgreSQL 16
+# Install TimescaleDB for PostgreSQL 18 (or 16/17)
 sudo apt update
-sudo apt install -y timescaledb-2-postgresql-16
+sudo apt install -y timescaledb-2-postgresql-18
 
 # Run the TimescaleDB tuner (auto-configures postgresql.conf)
 sudo timescaledb-tune --yes --quiet
@@ -486,10 +493,11 @@ SQL
 
 #### 9B.3 Harden PostgreSQL
 
-Edit `/etc/postgresql/16/main/postgresql.conf`:
+Edit `/etc/postgresql/<VERSION>/main/postgresql.conf` (replace `<VERSION>` with `16`, `17`, or `18`):
 
 ```bash
-sudo nano /etc/postgresql/16/main/postgresql.conf
+# Replace 18 with your installed PG version
+sudo nano /etc/postgresql/18/main/postgresql.conf
 ```
 
 Key settings to verify/change:
@@ -505,10 +513,10 @@ work_mem = 32MB
 maintenance_work_mem = 256MB
 ```
 
-Edit `/etc/postgresql/16/main/pg_hba.conf` to use password auth:
+Edit `/etc/postgresql/<VERSION>/main/pg_hba.conf` to use password auth:
 
 ```bash
-sudo nano /etc/postgresql/16/main/pg_hba.conf
+sudo nano /etc/postgresql/18/main/pg_hba.conf
 ```
 
 Ensure this line exists for local TCP connections:
