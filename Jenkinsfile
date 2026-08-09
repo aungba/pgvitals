@@ -33,6 +33,9 @@ pipeline {
         stage('Checkout GitHub Repository') {
             agent any
             steps {
+                // Clean workspace to remove root-owned files from previous Docker builds
+                sh 'rm -rf .pnpm-store node_modules || true'
+
                 echo "Checking out branch '${params.BRANCH_NAME}' from GitHub..."
                 checkout([
                     $class: 'GitSCM',
@@ -42,7 +45,7 @@ pipeline {
                         credentialsId: "${env.GITHUB_CREDENTIALS_ID}"
                     ]]
                 ])
-                stash includes: '**', name: 'source'
+                stash includes: '**', excludes: '.pnpm-store/**,node_modules/**', name: 'source'
             }
         }
 
@@ -50,29 +53,29 @@ pipeline {
             agent {
                 docker {
                     image 'node:22-slim'
-                    args '-u root'
+                    args '-u root -e PNPM_STORE_DIR=/tmp/.pnpm-store'
                 }
-            }
-            environment {
-                // Store pnpm cache inside the container (not in Jenkins workspace)
-                // to avoid root-owned files causing permission errors
-                PNPM_STORE_DIR = '/tmp/.pnpm-store'
             }
             steps {
                 unstash 'source'
 
                 echo 'Installing pnpm and dependencies...'
                 sh '''
+                    export PNPM_STORE_DIR=/tmp/.pnpm-store
                     corepack enable
                     corepack prepare pnpm@latest --activate
-                    pnpm install --frozen-lockfile
+                    pnpm install --frozen-lockfile || pnpm install --frozen-lockfile --ignore-scripts
                 '''
 
                 echo 'Running automated test suite...'
-                sh 'pnpm test'
+                sh '''
+                    export PNPM_STORE_DIR=/tmp/.pnpm-store
+                    pnpm test
+                '''
 
                 echo 'Building Collector and Web applications...'
                 sh '''
+                    export PNPM_STORE_DIR=/tmp/.pnpm-store
                     pnpm --filter @pgvitals/collector build
                     pnpm --filter @pgvitals/web build
                 '''
