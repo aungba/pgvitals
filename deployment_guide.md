@@ -215,8 +215,12 @@ docker compose version
 ## 5. Install Node.js & pnpm
 
 ```bash
-# Install Node.js 20 LTS via NodeSource
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+# Install Node.js LTS via NodeSource
+# PG Vitals requires Node.js >= 20. Pick one:
+#   - Node 22 LTS (recommended, long-term support until 2027)
+#   - Node 20 LTS (also supported)
+#   - Node 26    (latest current, also works)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 
 # Verify Node.js
