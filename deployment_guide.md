@@ -171,10 +171,17 @@ ssh-keygen -t ed25519 -C "deploy@pgvitals-server" -N "" -f ~/.ssh/id_ed25519
 
 # Display public key to register in GitHub (Repository -> Settings -> Deploy keys)
 cat ~/.ssh/id_ed25519.pub
+
+# Return to root/sudo user for system-level installations (steps 4–5)
+exit
 ```
 
 > [!IMPORTANT]
 > **Dedicated User Best Practice**: Running application processes, PM2, and deployment builds under the `pgvitals` user ensures application execution follows principle of least privilege rather than running as `root`.
+>
+> **User context summary:**
+> - **Steps 3–5** (system setup, Docker, Node.js): Run as your **root/sudo user**
+> - **Steps 6 onwards** (clone, build, run): Run as the **`pgvitals`** user
 
 ---
 
@@ -182,6 +189,8 @@ cat ~/.ssh/id_ed25519.pub
 
 > [!TIP]
 > **Bare metal path?** Skip this entire section and go directly to [Step 5](#5-install-nodejs--pnpm).
+
+> Run these commands as your **root/sudo user** (not `pgvitals`).
 
 ```bash
 # Add Docker's official GPG key
@@ -199,8 +208,9 @@ echo \
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
-# Add your user to docker group (no sudo needed for docker commands)
+# Add BOTH your admin user and pgvitals to docker group
 sudo usermod -aG docker $USER
+sudo usermod -aG docker pgvitals
 
 # Apply group change (or log out and back in)
 newgrp docker
@@ -213,6 +223,8 @@ docker compose version
 ---
 
 ## 5. Install Node.js & pnpm
+
+> Run these commands as your **root/sudo user** (not `pgvitals`).
 
 ```bash
 # Install Node.js LTS via NodeSource
@@ -238,11 +250,13 @@ pnpm --version
 
 ## 6. Clone the Repository
 
-```bash
-# Clone to /opt/pgvitals
-sudo mkdir -p /opt/pgvitals
-sudo chown $USER:$USER /opt/pgvitals
+> **Switch to the `pgvitals` user** — all remaining steps run as `pgvitals`.
 
+```bash
+# Switch to pgvitals user (all steps from here use this user)
+sudo su - pgvitals
+
+# Clone to /opt/pgvitals (already owned by pgvitals from step 3)
 git clone https://github.com/aungba/pgvitals.git /opt/pgvitals
 cd /opt/pgvitals
 ```
