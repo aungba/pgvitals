@@ -33,8 +33,8 @@ pipeline {
         stage('Checkout GitHub Repository') {
             agent any
             steps {
-                // Clean root-owned files from previous Docker builds
-                sh 'docker run --rm -v "$WORKSPACE:/ws" alpine sh -c "rm -rf /ws/.pnpm-store /ws/node_modules" || true'
+                // Clean ALL root-owned files from previous Docker builds (jenkins user can't overwrite them)
+                sh 'docker run --rm -v "$WORKSPACE:/ws" alpine sh -c "find /ws -user root -exec rm -rf {} + 2>/dev/null; true"'
 
                 echo "Checking out branch '${params.BRANCH_NAME}' from GitHub..."
                 checkout([

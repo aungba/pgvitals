@@ -11,31 +11,28 @@ Timeout set to expire in 15 min
 Running on Jenkins in /var/lib/jenkins/workspace/PG_vital
 [Pipeline] {
 [Pipeline] sh
-+ rm -rf .pnpm-store node_modules
++ docker run --rm -v /var/lib/jenkins/workspace/PG_vital:/ws alpine sh -c rm -rf /ws/.pnpm-store /ws/node_modules
 [Pipeline] echo
 Checking out branch 'main' from GitHub...
 [Pipeline] checkout
 The recommended git tool is: NONE
 using credential github-credentials
-Cloning the remote Git repository
-Cloning repository https://github.com/aungba/pgvitals.git
- > git init /var/lib/jenkins/workspace/PG_vital # timeout=10
+ > git rev-parse --resolve-git-dir /var/lib/jenkins/workspace/PG_vital/.git # timeout=10
+Fetching changes from the remote Git repository
+ > git config remote.origin.url https://github.com/aungba/pgvitals.git # timeout=10
 Fetching upstream changes from https://github.com/aungba/pgvitals.git
  > git --version # timeout=10
  > git --version # 'git version 2.43.0'
 using GIT_ASKPASS to set credentials 
  > git fetch --tags --force --progress -- https://github.com/aungba/pgvitals.git +refs/heads/*:refs/remotes/origin/* # timeout=10
- > git config remote.origin.url https://github.com/aungba/pgvitals.git # timeout=10
- > git config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/* # timeout=10
-Avoid second fetch
  > git rev-parse refs/remotes/origin/main^{commit} # timeout=10
-Checking out Revision c472eb2469e8e91428b7c2eba0c6370ec2590395 (refs/remotes/origin/main)
+Checking out Revision 152823e1bd810e879f4cadd5098ab20e58576371 (refs/remotes/origin/main)
  > git config core.sparsecheckout # timeout=10
- > git checkout -f c472eb2469e8e91428b7c2eba0c6370ec2590395 # timeout=10
-Commit message: "fix: inline PNPM_STORE_DIR + handle ignored builds error"
- > git rev-list --no-walk 20e25b260969b6f054449e2c4da9cdf07e07c58c # timeout=10
+ > git checkout -f 152823e1bd810e879f4cadd5098ab20e58576371 # timeout=10
+Commit message: "fix: use Docker to clean root-owned .pnpm-store files"
+ > git rev-list --no-walk 8d0a56490e9942698d12e9489d78124a118edfe8 # timeout=10
 [Pipeline] stash
-Stashed 156 file(s)
+Stashed 413 file(s)
 [Pipeline] }
 [Pipeline] // node
 [Pipeline] }
@@ -56,85 +53,12 @@ Running on Jenkins in /var/lib/jenkins/workspace/PG_vital
 [Pipeline] withDockerContainer
 Jenkins does not seem to be running inside a container
 $ docker run -t -d -u 110:114 -u root -e PNPM_STORE_DIR=/tmp/.pnpm-store -w /var/lib/jenkins/workspace/PG_vital -v /var/lib/jenkins/workspace/PG_vital:/var/lib/jenkins/workspace/PG_vital:rw,z -v /var/lib/jenkins/workspace/PG_vital@tmp:/var/lib/jenkins/workspace/PG_vital@tmp:rw,z -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** node:22-slim cat
-$ docker top e1f26dd93ca0f146447d30d3b4358bf9c2abc232417435cce6cfa537828a54f4 -eo pid,comm
+$ docker top 9253420fba1ff4d7d572bcacc251167b360def42630fb2d961e0ef2c49f14e74 -eo pid,comm
 [Pipeline] {
 [Pipeline] unstash
-[Pipeline] echo
-Installing pnpm and dependencies...
-[Pipeline] sh
-+ export PNPM_STORE_DIR=/tmp/.pnpm-store
-+ corepack enable
-+ corepack prepare pnpm@latest --activate
-Preparing pnpm@latest for immediate activation...
-+ pnpm install --frozen-lockfile
-Scope: all 4 workspace projects
-? Verifying lockfile against supply-chain policies (352 entries)...
-Lockfile is up to date, resolution step is skipped
-Progress: resolved 1, reused 0, downloaded 0, added 0
-Packages: +222
-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-Progress: resolved 222, reused 0, downloaded 0, added 0
-Progress: resolved 222, reused 0, downloaded 45, added 0
-Progress: resolved 222, reused 0, downloaded 56, added 0
-Packages are hard linked from the content-addressable store to the virtual store.
-  Content-addressable store is at: /var/lib/jenkins/workspace/PG_vital/.pnpm-store/v11
-  Virtual store is at:             node_modules/.pnpm
-Progress: resolved 222, reused 0, downloaded 63, added 1
-✓ Lockfile passes supply-chain policies (352 entries in 4.6s)
-Progress: resolved 222, reused 0, downloaded 108, added 4
-Progress: resolved 222, reused 0, downloaded 171, added 8
-Progress: resolved 222, reused 0, downloaded 222, added 222, done
-
-devDependencies:
-+ vitest 4.1.10
-
-[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: esbuild@0.18.20, esbuild@0.25.12, esbuild@0.28.1, msgpackr-extract@3.0.4, sharp@0.34.5
-
-Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
-+ pnpm install --frozen-lockfile --ignore-scripts
-Scope: all 4 workspace projects
-✓ Lockfile passes supply-chain policies (verified 3s ago)
-Lockfile is up to date, resolution step is skipped
-Already up to date
-
-Done in 900ms using pnpm v11.21.0
-[Pipeline] echo
-Running automated test suite...
-[Pipeline] sh
-+ export PNPM_STORE_DIR=/tmp/.pnpm-store
-+ pnpm test
-$ vitest run
-[33m(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
-  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
-Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.[39m
-
-[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90m/var/lib/jenkins/workspace/PG_vital[39m
-
- [32m✓[39m apps/collector/tests/fingerprint.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 8[2mms[22m[39m
- [32m✓[39m apps/collector/tests/redact-query.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 9[2mms[22m[39m
- [32m✓[39m apps/collector/tests/cost-model.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 7[2mms[22m[39m
- [32m✓[39m apps/collector/tests/safe-query.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 9[2mms[22m[39m
- [32m✓[39m apps/collector/tests/encryption.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 10[2mms[22m[39m
-
-[2m Test Files [22m [1m[32m5 passed[39m[22m[90m (5)[39m
-[2m      Tests [22m [1m[32m80 passed[39m[22m[90m (80)[39m
-[2m   Start at [22m 15:28:45
-[2m   Duration [22m 893ms[2m (transform 107ms, setup 0ms, import 179ms, tests 44ms, environment 1ms)[22m
-
-[Pipeline] echo
-Building Collector and Web applications...
-[Pipeline] sh
-+ export PNPM_STORE_DIR=/tmp/.pnpm-store
-+ pnpm --filter @pgvitals/collector build
-$ tsc
-src/collector/plan-regression-collector.ts(416,36): error TS2339: Property 'rows' does not exist on type 'RowList<Record<string, unknown>[]>'.
-src/collector/plan-regression-collector.ts(466,34): error TS2339: Property 'rows' does not exist on type 'RowList<Record<string, unknown>[]>'.
-/var/lib/jenkins/workspace/PG_vital/apps/collector:
-[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @pgvitals/collector@0.1.0 build: `tsc`
-Exit status 2
 [Pipeline] }
-$ docker stop --time=1 e1f26dd93ca0f146447d30d3b4358bf9c2abc232417435cce6cfa537828a54f4
-$ docker rm -f --volumes e1f26dd93ca0f146447d30d3b4358bf9c2abc232417435cce6cfa537828a54f4
+$ docker stop --time=1 9253420fba1ff4d7d572bcacc251167b360def42630fb2d961e0ef2c49f14e74
+$ docker rm -f --volumes 9253420fba1ff4d7d572bcacc251167b360def42630fb2d961e0ef2c49f14e74
 [Pipeline] // withDockerContainer
 [Pipeline] }
 [Pipeline] // node
@@ -163,5 +87,31 @@ Stage "Verify Health" skipped due to earlier failure(s)
 [Pipeline] }
 [Pipeline] // withEnv
 [Pipeline] End of Pipeline
-ERROR: script returned exit code 2
+hudson.remoting.ProxyException: java.nio.file.AccessDeniedException: /var/lib/jenkins/workspace/PG_vital/apps/collector/dist/alerting/email-notifier.d.ts
+	at java.base/sun.nio.fs.UnixException.translateToIOException(UnixException.java:90)
+	at java.base/sun.nio.fs.UnixException.rethrowAsIOException(UnixException.java:106)
+	at java.base/sun.nio.fs.UnixException.rethrowAsIOException(UnixException.java:111)
+	at java.base/sun.nio.fs.UnixFileSystemProvider.newByteChannel(UnixFileSystemProvider.java:261)
+	at java.base/java.nio.file.spi.FileSystemProvider.newOutputStream(FileSystemProvider.java:482)
+	at java.base/java.nio.file.Files.newOutputStream(Files.java:228)
+	at hudson.util.IOUtils.copy(IOUtils.java:52)
+	at hudson.FilePath.readFromTar(FilePath.java:3070)
+Also:   hudson.remoting.ProxyException: org.jenkinsci.plugins.workflow.actions.ErrorAction$ErrorId: e98a83e2-afdc-48c5-a441-ee6a5f643218
+Caused: hudson.remoting.ProxyException: java.io.IOException: Failed to extract source.tar.gz
+	at hudson.FilePath.readFromTar(FilePath.java:3080)
+	at hudson.FilePath.readFromTar(FilePath.java:3044)
+	at hudson.FilePath$UntarLocal.invoke(FilePath.java:646)
+	at hudson.FilePath$UntarLocal.invoke(FilePath.java:635)
+	at hudson.FilePath.act(FilePath.java:1210)
+	at hudson.FilePath.act(FilePath.java:1193)
+	at hudson.FilePath.untar(FilePath.java:611)
+	at PluginClassLoader for workflow-api//org.jenkinsci.plugins.workflow.flow.StashManager.unstash(StashManager.java:162)
+	at PluginClassLoader for workflow-basic-steps//org.jenkinsci.plugins.workflow.support.steps.stash.UnstashStep$Execution.run(UnstashStep.java:78)
+	at PluginClassLoader for workflow-basic-steps//org.jenkinsci.plugins.workflow.support.steps.stash.UnstashStep$Execution.run(UnstashStep.java:65)
+	at PluginClassLoader for workflow-step-api//org.jenkinsci.plugins.workflow.steps.SynchronousNonBlockingStepExecution.lambda$start$0(SynchronousNonBlockingStepExecution.java:49)
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:572)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
 Finished: FAILURE
