@@ -110,7 +110,7 @@ pipeline {
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
                             corepack enable || true
-                            pnpm install --frozen-lockfile --prod
+                            pnpm install --frozen-lockfile --prod || pnpm install --frozen-lockfile --prod --ignore-scripts
                         '
                     """
 
