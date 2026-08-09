@@ -2,9 +2,9 @@ module.exports = {
   apps: [
     {
       name: 'pgvitals-collector',
-      cwd: './',
-      script: 'apps/collector/src/index.ts',
-      interpreter: './node_modules/.bin/tsx',
+      cwd: '/opt/pgvitals',
+      script: 'pnpm',
+      args: '--filter @pgvitals/collector start',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -15,9 +15,9 @@ module.exports = {
     },
     {
       name: 'pgvitals-web',
-      cwd: './apps/web',
-      script: 'node_modules/.bin/next',
-      args: 'start',
+      cwd: '/opt/pgvitals',
+      script: 'pnpm',
+      args: '--filter @pgvitals/web start',
       instances: 1,
       autorestart: true,
       watch: false,
