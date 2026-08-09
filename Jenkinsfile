@@ -80,6 +80,9 @@ pipeline {
                     pnpm --filter @pgvitals/web build
                 '''
 
+                // Fix file ownership: Docker runs as root, but Jenkins agent needs to read/write these files
+                sh 'chown -R 110:114 . || true'
+
                 stash includes: '**', excludes: 'node_modules/**,.git/**,.pnpm-store/**', name: 'build'
             }
         }

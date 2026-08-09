@@ -11,28 +11,31 @@ Timeout set to expire in 15 min
 Running on Jenkins in /var/lib/jenkins/workspace/PG_vital
 [Pipeline] {
 [Pipeline] sh
-+ docker run --rm -v /var/lib/jenkins/workspace/PG_vital:/ws alpine sh -c rm -rf /ws/.pnpm-store /ws/node_modules
++ docker run --rm -v /var/lib/jenkins/workspace/PG_vital:/ws alpine sh -c find /ws -user root -exec rm -rf {} + 2>/dev/null; true
 [Pipeline] echo
 Checking out branch 'main' from GitHub...
 [Pipeline] checkout
 The recommended git tool is: NONE
 using credential github-credentials
- > git rev-parse --resolve-git-dir /var/lib/jenkins/workspace/PG_vital/.git # timeout=10
-Fetching changes from the remote Git repository
- > git config remote.origin.url https://github.com/aungba/pgvitals.git # timeout=10
+Cloning the remote Git repository
+Cloning repository https://github.com/aungba/pgvitals.git
+ > git init /var/lib/jenkins/workspace/PG_vital # timeout=10
 Fetching upstream changes from https://github.com/aungba/pgvitals.git
  > git --version # timeout=10
  > git --version # 'git version 2.43.0'
 using GIT_ASKPASS to set credentials 
  > git fetch --tags --force --progress -- https://github.com/aungba/pgvitals.git +refs/heads/*:refs/remotes/origin/* # timeout=10
+ > git config remote.origin.url https://github.com/aungba/pgvitals.git # timeout=10
+ > git config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/* # timeout=10
+Avoid second fetch
  > git rev-parse refs/remotes/origin/main^{commit} # timeout=10
-Checking out Revision 152823e1bd810e879f4cadd5098ab20e58576371 (refs/remotes/origin/main)
+Checking out Revision 018f88addbc3310d0d94ddbe7271a15748d78008 (refs/remotes/origin/main)
  > git config core.sparsecheckout # timeout=10
- > git checkout -f 152823e1bd810e879f4cadd5098ab20e58576371 # timeout=10
-Commit message: "fix: use Docker to clean root-owned .pnpm-store files"
- > git rev-list --no-walk 8d0a56490e9942698d12e9489d78124a118edfe8 # timeout=10
+ > git checkout -f 018f88addbc3310d0d94ddbe7271a15748d78008 # timeout=10
+Commit message: "fix: clean ALL root-owned files, not just .pnpm-store"
+ > git rev-list --no-walk 152823e1bd810e879f4cadd5098ab20e58576371 # timeout=10
 [Pipeline] stash
-Stashed 413 file(s)
+Stashed 156 file(s)
 [Pipeline] }
 [Pipeline] // node
 [Pipeline] }
@@ -53,12 +56,134 @@ Running on Jenkins in /var/lib/jenkins/workspace/PG_vital
 [Pipeline] withDockerContainer
 Jenkins does not seem to be running inside a container
 $ docker run -t -d -u 110:114 -u root -e PNPM_STORE_DIR=/tmp/.pnpm-store -w /var/lib/jenkins/workspace/PG_vital -v /var/lib/jenkins/workspace/PG_vital:/var/lib/jenkins/workspace/PG_vital:rw,z -v /var/lib/jenkins/workspace/PG_vital@tmp:/var/lib/jenkins/workspace/PG_vital@tmp:rw,z -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** node:22-slim cat
-$ docker top 9253420fba1ff4d7d572bcacc251167b360def42630fb2d961e0ef2c49f14e74 -eo pid,comm
+$ docker top 97283a4e294ebfb360ee5992906d8140301bb23e27b834d2907defb989398f08 -eo pid,comm
 [Pipeline] {
 [Pipeline] unstash
+[Pipeline] echo
+Installing pnpm and dependencies...
+[Pipeline] sh
++ export PNPM_STORE_DIR=/tmp/.pnpm-store
++ corepack enable
++ corepack prepare pnpm@latest --activate
+Preparing pnpm@latest for immediate activation...
++ pnpm install --frozen-lockfile
+Scope: all 4 workspace projects
+? Verifying lockfile against supply-chain policies (352 entries)...
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +222
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 222, reused 0, downloaded 0, added 0
+Progress: resolved 222, reused 0, downloaded 35, added 0
+Progress: resolved 222, reused 0, downloaded 59, added 0
+Progress: resolved 222, reused 0, downloaded 63, added 0
+✓ Lockfile passes supply-chain policies (352 entries in 4.4s)
+Packages are hard linked from the content-addressable store to the virtual store.
+  Content-addressable store is at: /var/lib/jenkins/workspace/PG_vital/.pnpm-store/v11
+  Virtual store is at:             node_modules/.pnpm
+Progress: resolved 222, reused 0, downloaded 120, added 4
+Progress: resolved 222, reused 0, downloaded 182, added 8
+Progress: resolved 222, reused 0, downloaded 222, added 222, done
+
+devDependencies:
++ vitest 4.1.10
+
+[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: esbuild@0.18.20, esbuild@0.25.12, esbuild@0.28.1, msgpackr-extract@3.0.4, sharp@0.34.5
+
+Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
++ pnpm install --frozen-lockfile --ignore-scripts
+Scope: all 4 workspace projects
+✓ Lockfile passes supply-chain policies (verified 3s ago)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+Done in 912ms using pnpm v11.21.0
+[Pipeline] echo
+Running automated test suite...
+[Pipeline] sh
++ export PNPM_STORE_DIR=/tmp/.pnpm-store
++ pnpm test
+$ vitest run
+[33m(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.[39m
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90m/var/lib/jenkins/workspace/PG_vital[39m
+
+ [32m✓[39m apps/collector/tests/fingerprint.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/redact-query.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/cost-model.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/safe-query.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/encryption.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m      Tests [22m [1m[32m80 passed[39m[22m[90m (80)[39m
+[2m   Start at [22m 15:37:52
+[2m   Duration [22m 888ms[2m (transform 98ms, setup 0ms, import 180ms, tests 43ms, environment 1ms)[22m
+
+[Pipeline] echo
+Building Collector and Web applications...
+[Pipeline] sh
++ export PNPM_STORE_DIR=/tmp/.pnpm-store
++ pnpm --filter @pgvitals/collector build
+$ tsc
++ pnpm --filter @pgvitals/web build
+$ next build
+⚠ No build cache found. Please configure build caching for faster rebuilds. Read more: https://nextjs.org/docs/messages/no-cache
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+   ▲ Next.js 15.5.22
+
+   Creating an optimized production build ...
+<w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (264kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
+ ✓ Compiled successfully in 21.2s
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/8) ...
+   Generating static pages (2/8) 
+   Generating static pages (4/8) 
+   Generating static pages (6/8) 
+ ✓ Generating static pages (8/8)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                 Size  First Load JS
+┌ ○ /                                    1.79 kB         150 kB
+├ ○ /_not-found                            995 B         103 kB
+├ ƒ /databases/[id]                      7.26 kB         222 kB
+├ ƒ /databases/[id]/alerts               6.37 kB         112 kB
+├ ƒ /databases/[id]/costs                 3.9 kB         110 kB
+├ ƒ /databases/[id]/health               7.67 kB         219 kB
+├ ƒ /databases/[id]/indexes              5.16 kB         111 kB
+├ ƒ /databases/[id]/plans                8.51 kB         114 kB
+├ ƒ /databases/[id]/pooler               4.16 kB         110 kB
+├ ƒ /databases/[id]/queries              10.9 kB         218 kB
+├ ƒ /databases/[id]/schema                  4 kB         110 kB
+├ ○ /databases/new                       3.06 kB         109 kB
+├ ○ /onboarding                          4.58 kB         110 kB
+├ ○ /settings/billing                    2.09 kB         143 kB
+├ ○ /settings/team                       3.86 kB         110 kB
+├ ƒ /sign-in/[[...sign-in]]                339 B         147 kB
+└ ƒ /sign-up/[[...sign-up]]                339 B         147 kB
++ First Load JS shared by all             102 kB
+  ├ chunks/8b9e9954-e39d7fd20ced233b.js  54.2 kB
+  ├ chunks/994-324f8813b551d775.js       46.2 kB
+  └ other shared chunks (total)          2.04 kB
+
+
+ƒ Middleware                             91.3 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+[Pipeline] stash
+Stashed 21057 file(s)
 [Pipeline] }
-$ docker stop --time=1 9253420fba1ff4d7d572bcacc251167b360def42630fb2d961e0ef2c49f14e74
-$ docker rm -f --volumes 9253420fba1ff4d7d572bcacc251167b360def42630fb2d961e0ef2c49f14e74
+$ docker stop --time=1 97283a4e294ebfb360ee5992906d8140301bb23e27b834d2907defb989398f08
+$ docker rm -f --volumes 97283a4e294ebfb360ee5992906d8140301bb23e27b834d2907defb989398f08
 [Pipeline] // withDockerContainer
 [Pipeline] }
 [Pipeline] // node
@@ -66,8 +191,12 @@ $ docker rm -f --volumes 9253420fba1ff4d7d572bcacc251167b360def42630fb2d961e0ef2
 [Pipeline] // stage
 [Pipeline] stage
 [Pipeline] { (Deploy to Production)
-Stage "Deploy to Production" skipped due to earlier failure(s)
-[Pipeline] getContext
+[Pipeline] node
+Running on Jenkins in /var/lib/jenkins/workspace/PG_vital
+[Pipeline] {
+[Pipeline] unstash
+[Pipeline] }
+[Pipeline] // node
 [Pipeline] }
 [Pipeline] // stage
 [Pipeline] stage
@@ -96,8 +225,8 @@ hudson.remoting.ProxyException: java.nio.file.AccessDeniedException: /var/lib/je
 	at java.base/java.nio.file.Files.newOutputStream(Files.java:228)
 	at hudson.util.IOUtils.copy(IOUtils.java:52)
 	at hudson.FilePath.readFromTar(FilePath.java:3070)
-Also:   hudson.remoting.ProxyException: org.jenkinsci.plugins.workflow.actions.ErrorAction$ErrorId: e98a83e2-afdc-48c5-a441-ee6a5f643218
-Caused: hudson.remoting.ProxyException: java.io.IOException: Failed to extract source.tar.gz
+Also:   hudson.remoting.ProxyException: org.jenkinsci.plugins.workflow.actions.ErrorAction$ErrorId: 57b47847-fbb0-4625-8132-6023c76e3765
+Caused: hudson.remoting.ProxyException: java.io.IOException: Failed to extract build.tar.gz
 	at hudson.FilePath.readFromTar(FilePath.java:3080)
 	at hudson.FilePath.readFromTar(FilePath.java:3044)
 	at hudson.FilePath$UntarLocal.invoke(FilePath.java:646)
