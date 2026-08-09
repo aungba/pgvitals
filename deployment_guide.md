@@ -143,15 +143,24 @@ sudo apt update && sudo apt upgrade -y
 # Install essential tools
 sudo apt install -y curl wget git build-essential ca-certificates gnupg lsb-release ufw
 
+# Set system timezone (do this as root/sudo user BEFORE switching users)
+sudo timedatectl set-timezone UTC
+
 # 3.1 Create a Dedicated Deployment User ('pgvitals')
 sudo adduser pgvitals --disabled-password --gecos ""
 sudo usermod -aG sudo pgvitals
 
-# 3.2 Configure Deployment Directory and Ownership
+# 3.2 Allow pgvitals user to run specific commands without a password
+# (The user was created with --disabled-password, so normal sudo won't work)
+echo 'pgvitals ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx, /usr/bin/systemctl reload nginx, /usr/bin/certbot' | \
+  sudo tee /etc/sudoers.d/pgvitals-deploy
+sudo chmod 440 /etc/sudoers.d/pgvitals-deploy
+
+# 3.3 Configure Deployment Directory and Ownership
 sudo mkdir -p /opt/pgvitals /var/log/pgvitals
 sudo chown -R pgvitals:pgvitals /opt/pgvitals /var/log/pgvitals
 
-# 3.3 Configure SSH & GitHub Deploy Key (Switch to pgvitals user)
+# 3.4 Configure SSH & GitHub Deploy Key (Switch to pgvitals user)
 sudo su - pgvitals
 
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -162,9 +171,6 @@ ssh-keygen -t ed25519 -C "deploy@pgvitals-server" -N "" -f ~/.ssh/id_ed25519
 
 # Display public key to register in GitHub (Repository -> Settings -> Deploy keys)
 cat ~/.ssh/id_ed25519.pub
-
-# Set system timezone
-sudo timedatectl set-timezone UTC
 ```
 
 > [!IMPORTANT]
