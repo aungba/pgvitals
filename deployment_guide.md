@@ -160,21 +160,28 @@ sudo chmod 440 /etc/sudoers.d/pgvitals-deploy
 sudo mkdir -p /opt/pgvitals /var/log/pgvitals
 sudo chown -R pgvitals:pgvitals /opt/pgvitals /var/log/pgvitals
 
-# 3.4 Configure SSH & GitHub Deploy Key (Switch to pgvitals user)
+# 3.4 Configure SSH for Deployment (Switch to pgvitals user)
 sudo su - pgvitals
 
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
 
-# Generate SSH Deploy Key for GitHub access
+# Generate an SSH key pair for Jenkins → Azure VM deployment
 ssh-keygen -t ed25519 -C "deploy@pgvitals-server" -N "" -f ~/.ssh/id_ed25519
 
-# Display public key to register in GitHub (Repository -> Settings -> Deploy keys)
-cat ~/.ssh/id_ed25519.pub
+# Add the public key to authorized_keys so Jenkins can SSH in
+cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+
+# Display the PRIVATE key — copy this to Jenkins Credentials
+# (Jenkins → Credentials → Add → "SSH Username with private key" → ID: pgvitals-production-ssh)
+cat ~/.ssh/id_ed25519
 
 # Return to root/sudo user for system-level installations (steps 4–5)
 exit
 ```
+
+> [!CAUTION]
+> **Copy the private key** (`~/.ssh/id_ed25519`) displayed above and store it securely. You'll paste it into Jenkins Credentials (see step 6.1). **Do NOT share it** — anyone with this key can SSH into your production server as `pgvitals`.
 
 > [!IMPORTANT]
 > **Dedicated User Best Practice**: Running application processes, PM2, and deployment builds under the `pgvitals` user ensures application execution follows principle of least privilege rather than running as `root`.
