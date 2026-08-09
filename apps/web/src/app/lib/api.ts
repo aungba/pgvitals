@@ -118,6 +118,20 @@ async function request<T>(
     }
   }
 
+  // If no token is available yet (Clerk still loading), wait and retry
+  // This handles the race condition on initial page load / hard refresh
+  if (!token && typeof window !== "undefined") {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        token = (await getGlobalToken()) ?? undefined;
+      } catch {
+        // ignore
+      }
+      if (token) break;
+    }
+  }
+
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }

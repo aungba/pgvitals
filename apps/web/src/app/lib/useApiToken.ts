@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { setGlobalTokenGetter } from "./tokenStore";
 
@@ -11,6 +11,9 @@ const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
  * plus an `isReady` flag indicating whether auth has finished loading.
  *
  * Also registers a global token getter so api.ts can auto-attach tokens.
+ * The getter is registered synchronously via a ref (not useEffect) to
+ * avoid race conditions where child components make API calls before
+ * the parent's useEffect has run.
  */
 export function useApiToken(): { getToken: () => Promise<string | undefined>; isReady: boolean } {
   if (!clerkEnabled) {
@@ -26,16 +29,25 @@ export function useApiToken(): { getToken: () => Promise<string | undefined>; is
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const { getToken, isLoaded } = useAuth();
 
-  // Register the global token getter so api.ts can use it
+  // Store getToken in a ref so it's always the latest version
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
+
+  // Register the global token getter SYNCHRONOUSLY (during render)
+  // This avoids the race condition where child useEffects fire before
+  // this component's useEffect.
+  if (isLoaded) {
+    setGlobalTokenGetter(() => getTokenRef.current());
+  }
+
+  // Cleanup on unmount only
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
-    if (isLoaded) {
-      setGlobalTokenGetter(getToken);
-    }
     return () => {
       setGlobalTokenGetter(null);
     };
-  }, [getToken, isLoaded]);
+  }, []);
 
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const fn = useCallback(async (): Promise<string | undefined> => {
