@@ -13,9 +13,15 @@ pipeline {
 
     environment {
         NODE_ENV = 'production'
-        PATH = "/usr/local/bin:${env.PATH}"
         APP_DIR = '/opt/pgvitals'
-        GITHUB_CREDENTIALS_ID = 'github-credentials' // ID of stored credential in Jenkins Credentials Manager
+
+        // Jenkins Credentials Manager IDs
+        GITHUB_CREDENTIALS_ID = 'github-credentials'
+        // SSH credentials for the production Azure VM (add via Jenkins → Credentials → SSH Username with private key)
+        DEPLOY_SSH_CREDENTIALS_ID = 'pgvitals-production-ssh'
+        // Production server hostname
+        DEPLOY_HOST = 'pgva.japaneast.cloudapp.azure.com'
+        DEPLOY_USER = 'pgvitals'
     }
 
     options {
@@ -67,64 +73,84 @@ pipeline {
             }
         }
 
-        stage('Database Migrations') {
+        stage('Deploy to Production') {
             steps {
-                echo 'Applying database migrations...'
-                sh 'pnpm db:migrate'
-            }
-        }
+                echo "Deploying to ${env.DEPLOY_HOST}..."
+                sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
+                    // 1. Sync build artifacts to production server (preserving .env files)
+                    sh """
+                        rsync -az --delete \
+                          --exclude '.git' \
+                          --exclude 'node_modules' \
+                          --exclude '.env' \
+                          -e 'ssh -o StrictHostKeyChecking=no' \
+                          ./ ${env.DEPLOY_USER}@${env.DEPLOY_HOST}:${env.APP_DIR}/
+                    """
 
-        stage('Sync to Deploy Directory') {
-            steps {
-                echo "Syncing build artifacts to ${env.APP_DIR}..."
-                sh """
-                    rsync -a --delete \
-                      --exclude '.git' \
-                      --exclude 'node_modules' \
-                      --exclude '.env' \
-                      ./ ${env.APP_DIR}/
+                    // 2. Install production dependencies on the remote server
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
+                            cd ${env.APP_DIR}
+                            export PATH="/usr/local/bin:\$PATH"
+                            corepack enable || true
+                            pnpm install --frozen-lockfile --prod
+                        '
+                    """
 
-                    cd ${env.APP_DIR}
-                    pnpm install --frozen-lockfile --prod
-                """
-            }
-        }
+                    // 3. Run database migrations on the remote server
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
+                            cd ${env.APP_DIR}
+                            export PATH="/usr/local/bin:\$PATH"
+                            pnpm db:migrate
+                        '
+                    """
 
-        stage('Deploy Services (PM2)') {
-            steps {
-                echo 'Deploying and restarting PM2 process manager services...'
-                sh """
-                    cd ${env.APP_DIR}
-                    pm2 restart pgvitals-collector || pm2 start ecosystem.config.cjs --only pgvitals-collector
-                    pm2 restart pgvitals-web || pm2 start ecosystem.config.cjs --only pgvitals-web
-                    pm2 save
-                """
+                    // 4. Restart PM2 services on the remote server
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
+                            cd ${env.APP_DIR}
+                            export PATH="/usr/local/bin:\$PATH"
+                            pm2 restart pgvitals-collector || pm2 start ecosystem.config.cjs --only pgvitals-collector
+                            pm2 restart pgvitals-web || pm2 start ecosystem.config.cjs --only pgvitals-web
+                            pm2 save
+                        '
+                    """
+                }
             }
         }
 
         stage('Verify Health') {
             steps {
                 echo 'Verifying application health...'
-                sh '''
-                    echo "Checking Collector API health..."
-                    curl -sf http://localhost:3001/health || (echo "Collector health check failed!" && exit 1)
+                sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
+                            echo "Checking Collector API health..."
+                            curl -sf http://localhost:3001/health || (echo "Collector health check failed!" && exit 1)
 
-                    echo "Checking Web Dashboard response..."
-                    curl -sf -o /dev/null http://localhost:3000 || (echo "Web app health check failed!" && exit 1)
-                '''
+                            echo "Checking Web Dashboard response..."
+                            curl -sf -o /dev/null http://localhost:3000 || (echo "Web app health check failed!" && exit 1)
+                        '
+                    """
+                }
             }
         }
     }
 
     post {
         success {
-            echo "✓ PG Vitals bare-metal deployment of branch '${params.BRANCH_NAME}' succeeded."
+            echo "✓ PG Vitals deployment of branch '${params.BRANCH_NAME}' to ${env.DEPLOY_HOST} succeeded."
         }
         failure {
             echo "✗ PG Vitals deployment failed for branch '${params.BRANCH_NAME}'."
         }
         always {
-            sh 'pm2 status'
+            sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
+                sh """
+                    ssh -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} 'pm2 status' || true
+                """
+            }
         }
     }
 }

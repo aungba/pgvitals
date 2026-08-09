@@ -253,10 +253,16 @@ pnpm --version
 > **Switch to the `pgvitals` user** — all remaining steps run as `pgvitals`.
 
 > [!TIP]
-> **Using Jenkins CI/CD?** Skip this step. The included [`Jenkinsfile`](Jenkinsfile) handles checkout, build, migration, and PM2 restart automatically. You only need to:
-> 1. Ensure `/opt/pgvitals` exists and is owned by the Jenkins build user
-> 2. Configure the Jenkins pipeline to point to your GitHub repo
-> 3. Set up `.env` files (steps 7–8) — then Jenkins handles steps 6, 10–13 on each push
+> **Using Jenkins CI/CD?** Skip this step. The included [`Jenkinsfile`](Jenkinsfile) builds on the Jenkins server, then deploys to your Azure VM via SSH. Setup:
+> 1. **Install Jenkins plugins:** `SSH Agent`, `Pipeline`, `Git`
+> 2. **Add SSH key to Jenkins:** Go to Jenkins → Manage Jenkins → Credentials → Add Credentials:
+>    - Kind: **SSH Username with private key**
+>    - ID: `pgvitals-production-ssh`
+>    - Username: `pgvitals`
+>    - Private Key: paste the private key that can SSH into your Azure VM
+> 3. **Add GitHub credentials:** same page, add your GitHub token with ID `github-credentials`
+> 4. **Create pipeline:** New Item → Pipeline → set Definition to "Pipeline script from SCM" → Git → your repo URL
+> 5. Set up `.env` files on the Azure VM (steps 7–8) — then Jenkins handles steps 6, 10–13 on each push
 
 ```bash
 # Switch to pgvitals user (all steps from here use this user)
