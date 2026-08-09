@@ -298,18 +298,12 @@ Create the production environment file:
 
 ```bash
 cd /opt/pgvitals
-cp .env.example .env
 ```
 
-Edit `.env` with your actual values:
+Create `.env` with your actual values:
 
 ```bash
-nano .env
-```
-
-Set the following values (replace placeholders):
-
-```env
+cat > /opt/pgvitals/.env << 'EOF'
 # ==============================
 # PG Vitals — Production Config
 # ==============================
@@ -341,13 +335,23 @@ STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_PRO_PRICE_ID=
 STRIPE_TEAM_PRICE_ID=
+EOF
+```
+
+Then edit the file to replace placeholders with your actual values:
+
+```bash
+nano /opt/pgvitals/.env
 ```
 
 Copy the `.env` file to where each app needs it:
 
+> [!IMPORTANT]
+> These subdirectories only exist **after the repo is cloned** (step 6) or **after the first Jenkins build**. Run this after the repo is in place:
+
 ```bash
-cp .env apps/collector/.env
-cp .env packages/db/.env
+cp /opt/pgvitals/.env /opt/pgvitals/apps/collector/.env
+cp /opt/pgvitals/.env /opt/pgvitals/packages/db/.env
 ```
 
 ---
