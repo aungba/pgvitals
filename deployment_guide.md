@@ -252,6 +252,12 @@ pnpm --version
 
 > **Switch to the `pgvitals` user** — all remaining steps run as `pgvitals`.
 
+> [!TIP]
+> **Using Jenkins CI/CD?** Skip this step. The included [`Jenkinsfile`](Jenkinsfile) handles checkout, build, migration, and PM2 restart automatically. You only need to:
+> 1. Ensure `/opt/pgvitals` exists and is owned by the Jenkins build user
+> 2. Configure the Jenkins pipeline to point to your GitHub repo
+> 3. Set up `.env` files (steps 7–8) — then Jenkins handles steps 6, 10–13 on each push
+
 ```bash
 # Switch to pgvitals user (all steps from here use this user)
 sudo su - pgvitals

@@ -74,14 +74,30 @@ pipeline {
             }
         }
 
+        stage('Sync to Deploy Directory') {
+            steps {
+                echo "Syncing build artifacts to ${env.APP_DIR}..."
+                sh """
+                    rsync -a --delete \
+                      --exclude '.git' \
+                      --exclude 'node_modules' \
+                      ./ ${env.APP_DIR}/
+
+                    cd ${env.APP_DIR}
+                    pnpm install --frozen-lockfile --prod
+                """
+            }
+        }
+
         stage('Deploy Services (PM2)') {
             steps {
                 echo 'Deploying and restarting PM2 process manager services...'
-                sh '''
+                sh """
+                    cd ${env.APP_DIR}
                     pm2 restart pgvitals-collector || pm2 start ecosystem.config.cjs --only pgvitals-collector
                     pm2 restart pgvitals-web || pm2 start ecosystem.config.cjs --only pgvitals-web
                     pm2 save
-                '''
+                """
             }
         }
 
