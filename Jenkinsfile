@@ -109,6 +109,7 @@ pipeline {
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
+                            export CI=true
                             corepack enable || true
                             pnpm install --frozen-lockfile || pnpm install --frozen-lockfile --ignore-scripts
                         '

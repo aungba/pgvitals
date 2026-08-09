@@ -26,11 +26,11 @@ Fetching upstream changes from https://github.com/aungba/pgvitals.git
 using GIT_ASKPASS to set credentials 
  > git fetch --tags --force --progress -- https://github.com/aungba/pgvitals.git +refs/heads/*:refs/remotes/origin/* # timeout=10
  > git rev-parse refs/remotes/origin/main^{commit} # timeout=10
-Checking out Revision 4e2bf631b0c46040ac8098f8303fa579ead2b92f (refs/remotes/origin/main)
+Checking out Revision a32f70707dfd96c805fb2630f12fddeeea25e0c7 (refs/remotes/origin/main)
  > git config core.sparsecheckout # timeout=10
- > git checkout -f 4e2bf631b0c46040ac8098f8303fa579ead2b92f # timeout=10
-Commit message: "fix: add --ignore-scripts fallback for production pnpm install"
- > git rev-list --no-walk 02ac6c6e4713f50cc6699725a37b2f243104d466 # timeout=10
+ > git checkout -f a32f70707dfd96c805fb2630f12fddeeea25e0c7 # timeout=10
+Commit message: "fix: install all deps on production (tsx needed for db:migrate)"
+ > git rev-list --no-walk 4e2bf631b0c46040ac8098f8303fa579ead2b92f # timeout=10
 [Pipeline] stash
 Stashed 21060 file(s)
 [Pipeline] }
@@ -53,7 +53,7 @@ Running on Jenkins in /var/lib/jenkins/workspace/PG_vital
 [Pipeline] withDockerContainer
 Jenkins does not seem to be running inside a container
 $ docker run -t -d -u 110:114 -u root -e PNPM_STORE_DIR=/tmp/.pnpm-store -w /var/lib/jenkins/workspace/PG_vital -v /var/lib/jenkins/workspace/PG_vital:/var/lib/jenkins/workspace/PG_vital:rw,z -v /var/lib/jenkins/workspace/PG_vital@tmp:/var/lib/jenkins/workspace/PG_vital@tmp:rw,z -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** -e ******** node:22-slim cat
-$ docker top 2e01155ebf6147383e9c3833878c3357500f8524832a30dba6fdba6f9ba5f965 -eo pid,comm
+$ docker top 9641d01acbc3d20ef81d7f9b0cb9a05785f31d2dbc7367710345ce33ba8cd657 -eo pid,comm
 [Pipeline] {
 [Pipeline] unstash
 [Pipeline] echo
@@ -66,7 +66,7 @@ Preparing pnpm@latest for immediate activation...
 + pnpm install --frozen-lockfile
 Scope: all 4 workspace projects
 Already up to date
-Done in 697ms using pnpm v11.21.0
+Done in 720ms using pnpm v11.21.0
 [Pipeline] echo
 Running automated test suite...
 [Pipeline] sh
@@ -79,16 +79,16 @@ Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.[39m
 
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90m/var/lib/jenkins/workspace/PG_vital[39m
 
- [32m✓[39m apps/collector/tests/encryption.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 11[2mms[22m[39m
- [32m✓[39m apps/collector/tests/redact-query.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/redact-query.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/encryption.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 13[2mms[22m[39m
  [32m✓[39m apps/collector/tests/safe-query.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 9[2mms[22m[39m
- [32m✓[39m apps/collector/tests/fingerprint.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 8[2mms[22m[39m
- [32m✓[39m apps/collector/tests/cost-model.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/cost-model.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m apps/collector/tests/fingerprint.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 9[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m5 passed[39m[22m[90m (5)[39m
 [2m      Tests [22m [1m[32m80 passed[39m[22m[90m (80)[39m
-[2m   Start at [22m 15:55:24
-[2m   Duration [22m 899ms[2m (transform 93ms, setup 0ms, import 179ms, tests 48ms, environment 1ms)[22m
+[2m   Start at [22m 15:59:33
+[2m   Duration [22m 900ms[2m (transform 103ms, setup 0ms, import 183ms, tests 47ms, environment 1ms)[22m
 
 [Pipeline] echo
 Building Collector and Web applications...
@@ -102,7 +102,7 @@ $ next build
 
    Creating an optimized production build ...
 <w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (264kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
- ✓ Compiled successfully in 20.6s
+ ✓ Compiled successfully in 21.2s
    Linting and checking validity of types ...
    Collecting page data ...
    Generating static pages (0/8) ...
@@ -129,8 +129,8 @@ Route (app)                                 Size  First Load JS
 ├ ○ /onboarding                          4.58 kB         110 kB
 ├ ○ /settings/billing                    2.09 kB         143 kB
 ├ ○ /settings/team                       3.86 kB         110 kB
-├ ƒ /sign-in/[[...sign-in]]                339 B         147 kB
-└ ƒ /sign-up/[[...sign-up]]                339 B         147 kB
+├ ƒ /sign-in/[[...sign-in]]                340 B         147 kB
+└ ƒ /sign-up/[[...sign-up]]                340 B         147 kB
 + First Load JS shared by all             102 kB
   ├ chunks/8b9e9954-e39d7fd20ced233b.js  54.2 kB
   ├ chunks/994-324f8813b551d775.js       46.2 kB
@@ -147,8 +147,8 @@ Route (app)                                 Size  First Load JS
 [Pipeline] stash
 Stashed 21060 file(s)
 [Pipeline] }
-$ docker stop --time=1 2e01155ebf6147383e9c3833878c3357500f8524832a30dba6fdba6f9ba5f965
-$ docker rm -f --volumes 2e01155ebf6147383e9c3833878c3357500f8524832a30dba6fdba6f9ba5f965
+$ docker stop --time=1 9641d01acbc3d20ef81d7f9b0cb9a05785f31d2dbc7367710345ce33ba8cd657
+$ docker rm -f --volumes 9641d01acbc3d20ef81d7f9b0cb9a05785f31d2dbc7367710345ce33ba8cd657
 [Pipeline] // withDockerContainer
 [Pipeline] }
 [Pipeline] // node
@@ -178,42 +178,16 @@ Warning: A secret was passed to "sh" using Groovy String interpolation, which is
                             cd /opt/pgvitals
                             export PATH="/usr/local/bin:$PATH"
                             corepack enable || true
-                            pnpm install --frozen-lockfile --prod || pnpm install --frozen-lockfile --prod --ignore-scripts
+                            pnpm install --frozen-lockfile || pnpm install --frozen-lockfile --ignore-scripts
                         
 Scope: all 4 workspace projects
-✓ Lockfile passes supply-chain policies (verified 4m ago)
-Lockfile is up to date, resolution step is skipped
-Already up to date
+[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted removal of modules directory due to no TTY
 
-devDependencies: skipped
-
-[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: msgpackr-extract@3.0.4, sharp@0.34.5
-
-Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
+If you are running pnpm in CI, set the CI environment variable to "true", or set "confirmModulesPurge" to "false".
 Scope: all 4 workspace projects
-✓ Lockfile passes supply-chain policies (verified 4m ago)
-Lockfile is up to date, resolution step is skipped
-Already up to date
+[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted removal of modules directory due to no TTY
 
-devDependencies: skipped
-
-Done in 863ms using pnpm v11.21.0
-[Pipeline] sh
-Warning: A secret was passed to "sh" using Groovy String interpolation, which is insecure.
-		 Affected argument(s) used the following variable(s): [SSH_KEY]
-		 See https://jenkins.io/redirect/groovy-string-interpolation for details.
-+ ssh -i **** -o StrictHostKeyChecking=no pgvitals@pgva.japaneast.cloudapp.azure.com 
-                            cd /opt/pgvitals
-                            export PATH="/usr/local/bin:$PATH"
-                            pnpm db:migrate
-                        
-$ pnpm --filter @pgvitals/db migrate
-$ tsx src/migrate.ts
-sh: 1: tsx: not found
-/opt/pgvitals/packages/db:
-[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @pgvitals/db@0.1.0 migrate: `tsx src/migrate.ts`
-spawn ENOENT
-[ELIFECYCLE] Command failed with exit code 1.
+If you are running pnpm in CI, set the CI environment variable to "true", or set "confirmModulesPurge" to "false".
 [Pipeline] }
 [Pipeline] // withCredentials
 [Pipeline] }
