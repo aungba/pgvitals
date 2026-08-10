@@ -3,7 +3,7 @@
    Type-safe fetch wrapper for the collector API
    =================================================================== */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/collector-api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 /* ---------- Types ---------- */
 

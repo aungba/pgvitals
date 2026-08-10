@@ -13,7 +13,7 @@ interface BillingStatus {
   hasSubscription: boolean;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/collector-api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 const PLANS = [
   {

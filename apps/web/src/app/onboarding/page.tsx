@@ -17,7 +17,7 @@ import Link from "next/link";
    7. Optional Slack setup
    =================================================================== */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/collector-api";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface ValidationResult {
   success: boolean;
