@@ -103,30 +103,36 @@ export async function purgeOldData(
     table: never,
     timestampCol: never,
     idCol: never,
-    monitoredDbIdCol: never
+    monitoredDbIdCol: never,
+    tableName?: string
   ): Promise<number> {
-    if (retentionDaysOverride != null || retentionMap.size === 0) {
-      const result = await db
-        .delete(table)
-        .where(lt(timestampCol, defaultCutoff))
-        .returning({ id: idCol });
-      return result.length;
-    }
+    try {
+      if (retentionDaysOverride != null || retentionMap.size === 0) {
+        const result = await db
+          .delete(table)
+          .where(lt(timestampCol, defaultCutoff))
+          .returning({ id: idCol });
+        return result.length;
+      }
 
-    let totalDeleted = 0;
-    for (const { cutoff, dbIds } of groupCutoffs(cutoffByDb).values()) {
-      const result = await db
-        .delete(table)
-        .where(
-          and(
-            lt(timestampCol, cutoff),
-            inArray(monitoredDbIdCol, dbIds)
+      let totalDeleted = 0;
+      for (const { cutoff, dbIds } of groupCutoffs(cutoffByDb).values()) {
+        const result = await db
+          .delete(table)
+          .where(
+            and(
+              lt(timestampCol, cutoff),
+              inArray(monitoredDbIdCol, dbIds)
+            )
           )
-        )
-        .returning({ id: idCol });
-      totalDeleted += result.length;
+          .returning({ id: idCol });
+        totalDeleted += result.length;
+      }
+      return totalDeleted;
+    } catch (err) {
+      log.warn({ err, table: tableName }, "Retention purge skipped for table (may not exist yet)");
+      return 0;
     }
-    return totalDeleted;
   }
 
   // 1. Delete old sessions_snapshot rows
@@ -149,20 +155,24 @@ export async function purgeOldData(
 
   // 4. Delete old RESOLVED alerts (keep active alerts regardless of age)
   let deletedAlerts = 0;
-  if (retentionDaysOverride != null || retentionMap.size === 0) {
-    const alertsResult = await db
-      .delete(alerts)
-      .where(and(lt(alerts.firedAt, defaultCutoff), isNotNull(alerts.resolvedAt)))
-      .returning({ id: alerts.id });
-    deletedAlerts = alertsResult.length;
-  } else {
-    for (const { cutoff, dbIds } of groupCutoffs(cutoffByDb).values()) {
-      const result = await db
+  try {
+    if (retentionDaysOverride != null || retentionMap.size === 0) {
+      const alertsResult = await db
         .delete(alerts)
-        .where(and(lt(alerts.firedAt, cutoff), isNotNull(alerts.resolvedAt), inArray(alerts.monitoredDbId, dbIds)))
+        .where(and(lt(alerts.firedAt, defaultCutoff), isNotNull(alerts.resolvedAt)))
         .returning({ id: alerts.id });
-      deletedAlerts += result.length;
+      deletedAlerts = alertsResult.length;
+    } else {
+      for (const { cutoff, dbIds } of groupCutoffs(cutoffByDb).values()) {
+        const result = await db
+          .delete(alerts)
+          .where(and(lt(alerts.firedAt, cutoff), isNotNull(alerts.resolvedAt), inArray(alerts.monitoredDbId, dbIds)))
+          .returning({ id: alerts.id });
+        deletedAlerts += result.length;
+      }
     }
+  } catch (err) {
+    log.warn({ err }, "Retention purge skipped for alerts (may not exist yet)");
   }
 
   // 5. Delete old query_stats
@@ -179,18 +189,22 @@ export async function purgeOldData(
 
   // 7. Delete old dismissed index_recommendations
   let deletedIndexRecs = 0;
-  if (retentionDaysOverride != null || retentionMap.size === 0) {
-    const r = await db.delete(indexRecommendations)
-      .where(and(lt(indexRecommendations.detectedAt, defaultCutoff), eq(indexRecommendations.dismissed, true)))
-      .returning({ id: indexRecommendations.id });
-    deletedIndexRecs = r.length;
-  } else {
-    for (const { cutoff, dbIds } of groupCutoffs(cutoffByDb).values()) {
+  try {
+    if (retentionDaysOverride != null || retentionMap.size === 0) {
       const r = await db.delete(indexRecommendations)
-        .where(and(lt(indexRecommendations.detectedAt, cutoff), eq(indexRecommendations.dismissed, true), inArray(indexRecommendations.monitoredDbId, dbIds)))
+        .where(and(lt(indexRecommendations.detectedAt, defaultCutoff), eq(indexRecommendations.dismissed, true)))
         .returning({ id: indexRecommendations.id });
-      deletedIndexRecs += r.length;
+      deletedIndexRecs = r.length;
+    } else {
+      for (const { cutoff, dbIds } of groupCutoffs(cutoffByDb).values()) {
+        const r = await db.delete(indexRecommendations)
+          .where(and(lt(indexRecommendations.detectedAt, cutoff), eq(indexRecommendations.dismissed, true), inArray(indexRecommendations.monitoredDbId, dbIds)))
+          .returning({ id: indexRecommendations.id });
+        deletedIndexRecs += r.length;
+      }
     }
+  } catch (err) {
+    log.warn({ err }, "Retention purge skipped for index_recommendations (may not exist yet)");
   }
 
   // 8. Delete old table_bloat_stats
@@ -207,18 +221,22 @@ export async function purgeOldData(
 
   // 10. Delete old dismissed query_suggestions
   let deletedSuggestions = 0;
-  if (retentionDaysOverride != null || retentionMap.size === 0) {
-    const r = await db.delete(querySuggestions)
-      .where(and(lt(querySuggestions.detectedAt, defaultCutoff), eq(querySuggestions.dismissed, true)))
-      .returning({ id: querySuggestions.id });
-    deletedSuggestions = r.length;
-  } else {
-    for (const { cutoff, dbIds } of groupCutoffs(cutoffByDb).values()) {
+  try {
+    if (retentionDaysOverride != null || retentionMap.size === 0) {
       const r = await db.delete(querySuggestions)
-        .where(and(lt(querySuggestions.detectedAt, cutoff), eq(querySuggestions.dismissed, true), inArray(querySuggestions.monitoredDbId, dbIds)))
+        .where(and(lt(querySuggestions.detectedAt, defaultCutoff), eq(querySuggestions.dismissed, true)))
         .returning({ id: querySuggestions.id });
-      deletedSuggestions += r.length;
+      deletedSuggestions = r.length;
+    } else {
+      for (const { cutoff, dbIds } of groupCutoffs(cutoffByDb).values()) {
+        const r = await db.delete(querySuggestions)
+          .where(and(lt(querySuggestions.detectedAt, cutoff), eq(querySuggestions.dismissed, true), inArray(querySuggestions.monitoredDbId, dbIds)))
+          .returning({ id: querySuggestions.id });
+        deletedSuggestions += r.length;
+      }
     }
+  } catch (err) {
+    log.warn({ err }, "Retention purge skipped for query_suggestions (may not exist yet)");
   }
 
   // 11. Delete old table_size_history
