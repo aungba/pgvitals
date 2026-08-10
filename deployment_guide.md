@@ -778,6 +778,7 @@ module.exports = {
       cwd: "/opt/pgvitals/apps/web",
       script: "node_modules/.bin/next",
       args: "start",
+      interpreter: "none",
       instances: 1,
       exec_mode: "fork",
       env: {
