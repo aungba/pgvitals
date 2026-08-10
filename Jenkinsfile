@@ -73,9 +73,10 @@ pipeline {
                     pnpm test
                 '''
 
-                echo 'Building Collector and Web applications...'
+                echo 'Building DB, Collector, and Web applications...'
                 sh '''
                     export PNPM_STORE_DIR=/tmp/.pnpm-store
+                    pnpm --filter @pgvitals/db build
                     pnpm --filter @pgvitals/collector build
                     pnpm --filter @pgvitals/web build
                 '''
