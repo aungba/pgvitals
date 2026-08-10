@@ -130,6 +130,7 @@ pipeline {
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
+                            mkdir -p /var/log/pgvitals
                             pm2 delete all 2>/dev/null || true
                             pm2 start ecosystem.config.cjs
                             pm2 save
