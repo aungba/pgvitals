@@ -19,7 +19,8 @@ module.exports = {
     {
       name: "pgvitals-web",
       cwd: "/opt/pgvitals/apps/web",
-      script: "node_modules/next/dist/bin/next-start.js",
+      script: "node_modules/next/dist/bin/next",
+      args: "start",
       instances: 1,
       exec_mode: "fork",
       env: {
