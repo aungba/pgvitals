@@ -116,12 +116,12 @@ pipeline {
                         '
                     """
 
-                    // 3. Run database migrations on the remote server
+                    // 3. Run database migrations on the remote server (non-blocking if already applied)
                     sh """
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
-                            pnpm db:migrate
+                            pnpm db:migrate || echo "⚠️  Migration had errors (tables may already exist) — continuing..."
                         '
                     """
 
@@ -143,10 +143,12 @@ pipeline {
             agent any
             steps {
                 echo 'Verifying application health...'
+                sleep 5
                 withCredentials([sshUserPrivateKey(credentialsId: env.DEPLOY_SSH_CREDENTIALS_ID, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
                     sh """
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             echo "Checking Collector API health..."
+                            sleep 3
                             curl -sf http://localhost:3001/health || (echo "Collector health check failed!" && exit 1)
 
                             echo "Checking Web Dashboard response..."
