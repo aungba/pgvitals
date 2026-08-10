@@ -19,6 +19,8 @@ pipeline {
         GITHUB_CREDENTIALS_ID = 'github-credentials'
         // SSH credentials for the production Azure VM
         DEPLOY_SSH_CREDENTIALS_ID = 'pgvitals-production-ssh'
+        // Clerk auth credentials ID (stores publishable key)
+        CLERK_CREDENTIALS_ID = 'clerk-publishable-key'
         // Production server hostname
         DEPLOY_HOST = 'pgva.japaneast.cloudapp.azure.com'
         DEPLOY_USER = 'pgvitals'
@@ -74,12 +76,14 @@ pipeline {
                 '''
 
                 echo 'Building DB, Collector, and Web applications...'
-                sh '''
-                    export PNPM_STORE_DIR=/tmp/.pnpm-store
-                    pnpm --filter @pgvitals/db build
-                    pnpm --filter @pgvitals/collector build
-                    pnpm --filter @pgvitals/web build
-                '''
+                withCredentials([string(credentialsId: env.CLERK_CREDENTIALS_ID, variable: 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY')]) {
+                    sh '''
+                        export PNPM_STORE_DIR=/tmp/.pnpm-store
+                        pnpm --filter @pgvitals/db build
+                        pnpm --filter @pgvitals/collector build
+                        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY pnpm --filter @pgvitals/web build
+                    '''
+                }
 
                 // Fix file ownership: Docker runs as root, but Jenkins agent needs to read/write these files
                 sh 'chown -R 110:114 . || true'
