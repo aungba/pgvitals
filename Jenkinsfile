@@ -130,8 +130,8 @@ pipeline {
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
-                            pm2 restart pgvitals-collector || pm2 start ecosystem.config.cjs --only pgvitals-collector
-                            pm2 restart pgvitals-web || pm2 start ecosystem.config.cjs --only pgvitals-web
+                            pm2 delete all 2>/dev/null || true
+                            pm2 start ecosystem.config.cjs
                             pm2 save
                         '
                     """
