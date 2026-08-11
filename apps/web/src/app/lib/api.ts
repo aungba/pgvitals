@@ -35,10 +35,22 @@ export interface UtilizationData {
   maxConnections: number;
 }
 
+export interface HealthOverview {
+  cacheHitRatio: number | null;
+  dbSizeBytes: number | null;
+  tempFileBytes: number | null;
+  numBackends: number | null;
+  xactCommit: number | null;
+  xactRollback: number | null;
+  deadlocksCount: number | null;
+  capturedAt: string;
+}
+
 export interface OverviewResponse {
   database: { id: string; name: string };
   snapshot: Snapshot | null;
   utilization: UtilizationData | null;
+  health: HealthOverview | null;
 }
 
 export interface Session {

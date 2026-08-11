@@ -5,6 +5,7 @@ import {
   sessionsSnapshot,
   rootCauseHints,
   monitoredDatabases,
+  dbHealthSnapshots,
 } from "@pgvitals/db";
 import { eq, desc, and, gte, lte } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
@@ -66,6 +67,14 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
               )
             : 0;
 
+        // Get the latest health snapshot
+        const [latestHealth] = await db
+          .select()
+          .from(dbHealthSnapshots)
+          .where(eq(dbHealthSnapshots.monitoredDbId, id))
+          .orderBy(desc(dbHealthSnapshots.capturedAt))
+          .limit(1);
+
         return reply.send({
           database: mdb,
           snapshot: {
@@ -83,6 +92,18 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
             connectionCount: latestSnapshot.connectionCount,
             maxConnections: latestSnapshot.maxConnections,
           },
+          health: latestHealth
+            ? {
+                cacheHitRatio: latestHealth.cacheHitRatio,
+                dbSizeBytes: latestHealth.dbSizeBytes,
+                tempFileBytes: latestHealth.tempFileBytes,
+                numBackends: latestHealth.numBackends,
+                xactCommit: latestHealth.xactCommit,
+                xactRollback: latestHealth.xactRollback,
+                deadlocksCount: latestHealth.deadlocksCount,
+                capturedAt: latestHealth.capturedAt,
+              }
+            : null,
         });
       } catch (err) {
         request.log.error({ err }, "Failed to get overview");

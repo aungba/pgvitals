@@ -47,6 +47,14 @@ function formatTimestamp(ts: string): string {
   });
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const value = bytes / Math.pow(1024, i);
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
+}
+
 export default function DatabaseDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -510,6 +518,74 @@ export default function DatabaseDetailPage() {
           }
         />
       </div>
+
+      {/* ---------- Health Metrics Row ---------- */}
+      {overview?.health && (
+        <div className="stats-row stagger-children" style={{ marginTop: "var(--space-md)" }}>
+          <StatsCard
+            label="Cache Hit"
+            value={
+              overview.health.cacheHitRatio != null
+                ? `${(overview.health.cacheHitRatio * 100).toFixed(2)}%`
+                : "—"
+            }
+            icon="🎯"
+            color={
+              overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 0.99
+                ? "var(--signal-healthy)"
+                : overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 0.95
+                  ? "var(--signal-warning)"
+                  : "var(--signal-critical)"
+            }
+            subtitle={
+              overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 0.99
+                ? "Excellent"
+                : overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 0.95
+                  ? "Acceptable"
+                  : "Needs tuning"
+            }
+          />
+          <StatsCard
+            label="DB Size"
+            value={
+              overview.health.dbSizeBytes != null
+                ? formatBytes(overview.health.dbSizeBytes)
+                : "—"
+            }
+            icon="💾"
+            color="var(--brand)"
+          />
+          <StatsCard
+            label="Temp Files"
+            value={
+              overview.health.tempFileBytes != null
+                ? formatBytes(overview.health.tempFileBytes)
+                : "—"
+            }
+            icon="📁"
+            color={
+              overview.health.tempFileBytes != null && overview.health.tempFileBytes > 100 * 1024 * 1024
+                ? "var(--signal-warning)"
+                : "var(--signal-healthy)"
+            }
+            subtitle={
+              overview.health.tempFileBytes != null && overview.health.tempFileBytes > 100 * 1024 * 1024
+                ? "High — increase work_mem"
+                : "Normal"
+            }
+          />
+          <StatsCard
+            label="Deadlocks"
+            value={overview.health.deadlocksCount ?? 0}
+            icon="🔒"
+            color={
+              (overview.health.deadlocksCount ?? 0) > 0
+                ? "var(--signal-critical)"
+                : "var(--signal-healthy)"
+            }
+          />
+        </div>
+      )}
 
       {/* ---------- Gauge + Hints ---------- */}
       <div className="detail-grid" style={{ marginBottom: "var(--space-xl)" }}>
