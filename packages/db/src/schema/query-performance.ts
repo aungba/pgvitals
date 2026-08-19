@@ -55,6 +55,13 @@ export const queryStats = pgTable(
     pctOfTotalTime: doublePrecision("pct_of_total_time")
       .default(0)
       .notNull(),
+    stddevExecTime: doublePrecision("stddev_exec_time"),
+    p95ExecTime: doublePrecision("p95_exec_time"),
+    p99ExecTime: doublePrecision("p99_exec_time"),
+    varianceRatio: doublePrecision("variance_ratio"),
+    blkReadTime: doublePrecision("blk_read_time"),
+    blkWriteTime: doublePrecision("blk_write_time"),
+    ioTimePercentage: doublePrecision("io_time_percentage"),
   },
   (table) => [
     primaryKey({ columns: [table.id, table.capturedAt] }),

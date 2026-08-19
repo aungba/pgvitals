@@ -1,5 +1,12 @@
 import type { FastifyBaseLogger } from "fastify";
-import { db, tableBloatStats, dbHealthSnapshots, tableSizeHistory, monitoredDatabases } from "@pgvitals/db";
+import {
+  db,
+  tableBloatStats,
+  dbHealthSnapshots,
+  tableSizeHistory,
+  autovacuumStarvationEvents,
+  monitoredDatabases,
+} from "@pgvitals/db";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
 import { safeQuery } from "../lib/safe-query.js";
@@ -455,5 +462,90 @@ export async function collectVacuumHealth(
     log.info({ monitoredDbId, cacheHitRatio }, "DB health snapshot collected");
   } catch (err) {
     log.warn({ err, monitoredDbId }, "Failed to collect db health stats");
+  }
+
+  // 3. Autovacuum Starvation & Worker Contention Sentinel (Spec §5)
+  try {
+    const STARVATION_QUERY = `
+    WITH worker_stats AS (
+      SELECT 
+        count(*)::int AS active_workers,
+        current_setting('autovacuum_max_workers')::int AS max_workers
+      FROM pg_stat_activity 
+      WHERE query ~* '^autovacuum:'
+    ),
+    starved_candidates AS (
+      SELECT 
+        schemaname,
+        relname,
+        n_live_tup,
+        n_dead_tup,
+        ROUND((n_dead_tup::numeric / NULLIF(n_live_tup + n_dead_tup, 0)) * 100, 2) AS dead_tuple_pct
+      FROM pg_stat_user_tables
+      WHERE schemaname = 'public'
+        AND relname NOT LIKE '_hyper_%'
+        AND relname NOT LIKE '_timescaledb_%'
+        AND n_dead_tup > 10000 
+        AND (n_dead_tup::numeric / NULLIF(n_live_tup + n_dead_tup, 0)) > 0.20
+    )
+    SELECT 
+      sc.schemaname,
+      sc.relname,
+      sc.n_dead_tup::text AS dead_tuples,
+      sc.dead_tuple_pct::text AS dead_tuple_pct,
+      ws.active_workers,
+      ws.max_workers,
+      (ws.active_workers >= ws.max_workers) AS is_worker_saturated
+    FROM starved_candidates sc, worker_stats ws
+    ORDER BY sc.n_dead_tup DESC
+    LIMIT 20;
+    `;
+
+    interface StarvationRow {
+      schemaname: string;
+      relname: string;
+      dead_tuples: string;
+      dead_tuple_pct: string;
+      active_workers: number;
+      max_workers: number;
+      is_worker_saturated: boolean;
+    }
+
+    const starvationRows = await safeQuery<StarvationRow[]>(
+      connectionString,
+      STARVATION_QUERY,
+      { timeoutMs: 10000 }
+    );
+
+    if (starvationRows.length > 0) {
+      const eventRows = starvationRows.map((r) => {
+        const deadTuples = parseInt(r.dead_tuples, 10) || 0;
+        const deadRatio = parseFloat(r.dead_tuple_pct || "0");
+        const isSaturated = Boolean(r.is_worker_saturated);
+        const action = isSaturated
+          ? `All ${r.max_workers} autovacuum workers are busy. Consider increasing autovacuum_max_workers or raising autovacuum_vacuum_cost_limit.`
+          : `Table "${r.schemaname}.${r.relname}" has ${deadTuples.toLocaleString()} dead tuples (${deadRatio}%). Run manual VACUUM ANALYZE "${r.schemaname}"."${r.relname}" or check for blocking locks.`;
+
+        return {
+          monitoredDbId,
+          tableName: `${r.schemaname}.${r.relname}`,
+          deadTuples,
+          deadTupleRatio: deadRatio,
+          activeWorkers: r.active_workers,
+          maxWorkers: r.max_workers,
+          isWorkerSaturated: isSaturated,
+          suggestedAction: action,
+          capturedAt: now,
+        };
+      });
+
+      await db.insert(autovacuumStarvationEvents).values(eventRows);
+      log.warn(
+        { monitoredDbId, starvedTableCount: eventRows.length },
+        "Autovacuum starvation events detected and recorded"
+      );
+    }
+  } catch (err) {
+    log.debug({ err, monitoredDbId }, "Failed to collect autovacuum starvation events");
   }
 }

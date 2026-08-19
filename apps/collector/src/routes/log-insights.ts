@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { db, logInsights, dbErrorStats, monitoredDatabases } from "@pgvitals/db";
-import { eq, desc, and, gte } from "drizzle-orm";
+import { eq, desc, and, gte, or, ilike, type SQL } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 
 /* ===================================================================
@@ -23,7 +23,7 @@ export default async function logInsightRoutes(app: FastifyInstance): Promise<vo
    */
   app.get<{
     Params: { id: string };
-    Querystring: { hours?: string; severity?: string };
+    Querystring: { hours?: string; severity?: string; errorType?: string; filter?: string };
   }>(
     "/api/databases/:id/log-insights",
     { preHandler: [authMiddleware] },
@@ -31,26 +31,68 @@ export default async function logInsightRoutes(app: FastifyInstance): Promise<vo
       try {
         const { id } = request.params;
         const hours = Math.min(parseInt(request.query.hours ?? "24", 10), 168);
-        const severityFilter = request.query.severity;
+        const { severity, errorType, filter } = request.query;
 
         if (!await verifyDbOwnership(id, request.auth.orgId)) {
           return reply.status(404).send({ error: "Database not found" });
         }
 
         const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+        const conditions: SQL[] = [
+          eq(logInsights.monitoredDbId, id),
+          gte(logInsights.capturedAt, since),
+        ];
+
+        // 1. Handle severity query parameter
+        if (severity) {
+          const sLower = severity.toLowerCase();
+          if (sLower === "critical" || sLower === "error") {
+            conditions.push(eq(logInsights.severity, "error"));
+          } else if (sLower === "warning" || sLower === "info") {
+            conditions.push(eq(logInsights.severity, sLower as "warning" | "info"));
+          } else {
+            // Severity was passed an errorType (e.g. ?severity=deadlock)
+            conditions.push(
+              or(
+                eq(logInsights.errorType, severity),
+                ilike(logInsights.errorType, `%${severity}%`)
+              )!
+            );
+          }
+        }
+
+        // 2. Handle errorType query parameter
+        if (errorType && errorType !== "all") {
+          conditions.push(
+            or(
+              eq(logInsights.errorType, errorType),
+              ilike(logInsights.errorType, `%${errorType}%`)
+            )!
+          );
+        }
+
+        // 3. Handle generic filter parameter
+        if (filter && filter !== "all") {
+          const fLower = filter.toLowerCase();
+          if (fLower === "critical" || fLower === "error") {
+            conditions.push(eq(logInsights.severity, "error"));
+          } else if (fLower === "warning" || fLower === "info") {
+            conditions.push(eq(logInsights.severity, fLower as "warning" | "info"));
+          } else {
+            conditions.push(
+              or(
+                eq(logInsights.errorType, filter),
+                ilike(logInsights.errorType, `%${filter}%`),
+                ilike(logInsights.errorMessage, `%${filter}%`)
+              )!
+            );
+          }
+        }
 
         const insights = await db
           .select()
           .from(logInsights)
-          .where(
-            and(
-              eq(logInsights.monitoredDbId, id),
-              gte(logInsights.capturedAt, since),
-              ...(severityFilter
-                ? [eq(logInsights.severity, severityFilter as "error" | "warning" | "info")]
-                : [])
-            )
-          )
+          .where(and(...conditions))
           .orderBy(desc(logInsights.capturedAt))
           .limit(500);
 

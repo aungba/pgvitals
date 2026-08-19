@@ -22,6 +22,8 @@ export default function DashboardPage() {
   const [items, setItems] = useState<DbWithOverview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<"name" | "env" | "utilization" | "alerts">("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const { getToken, isReady } = useApiToken();
 
   const fetchData = useCallback(async () => {
@@ -56,6 +58,36 @@ export default function DashboardPage() {
     const interval = setInterval(fetchData, 10_000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  const sortedItems = React.useMemo(() => {
+    return [...items].sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      switch (sortKey) {
+        case "name":
+          return dir * a.db.name.localeCompare(b.db.name);
+        case "env":
+          return dir * a.db.environment.localeCompare(b.db.environment);
+        case "utilization": {
+          const utilA = a.overview?.utilization?.percent ?? 0;
+          const utilB = b.overview?.utilization?.percent ?? 0;
+          return dir * (utilA - utilB);
+        }
+        case "alerts":
+          return dir * (a.activeAlerts.length - b.activeAlerts.length);
+        default:
+          return 0;
+      }
+    });
+  }, [items, sortKey, sortDir]);
+
+  function handleSort(key: typeof sortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
 
   if (loading) {
     return (
@@ -102,15 +134,15 @@ export default function DashboardPage() {
           <h1>Dashboard</h1>
           <p>Monitor your PostgreSQL databases in real time</p>
         </div>
-        <div className="alert alert-error">
-          <span>⚠️</span>
-          <span>
-            Unable to connect to the collector API. Make sure it&apos;s running
-            on{" "}
-            <code style={{ fontFamily: "var(--font-mono)" }}>
-              {process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"}
-            </code>
-          </span>
+        <div className="empty-state animate-fade-in-up">
+          <div className="empty-state-icon">⚠️</div>
+          <h3>Failed to load databases</h3>
+          <p style={{ marginBottom: "var(--space-lg)", color: "var(--signal-critical)" }}>
+            {error}
+          </p>
+          <button onClick={fetchData} className="btn-primary">
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -139,19 +171,40 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1>Dashboard</h1>
-        <p>
-          Monitoring{" "}
-          <strong style={{ color: "var(--brand)" }}>
-            {items.length}
-          </strong>{" "}
-          database{items.length !== 1 ? "s" : ""} in real time
-        </p>
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "var(--space-md)" }}>
+        <div>
+          <h1>Dashboard</h1>
+          <p>
+            Monitoring{" "}
+            <strong style={{ color: "var(--brand)" }}>
+              {items.length}
+            </strong>{" "}
+            database{items.length !== 1 ? "s" : ""} in real time
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: "var(--space-xs)", alignItems: "center" }}>
+          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginRight: 4 }}>Sort:</span>
+          {[
+            { key: "name" as const, label: "Name" },
+            { key: "env" as const, label: "Env" },
+            { key: "utilization" as const, label: "Utilization" },
+            { key: "alerts" as const, label: "Alerts" },
+          ].map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => handleSort(opt.key)}
+              className={sortKey === opt.key ? "filter-chip active" : "filter-chip"}
+              data-active={sortKey === opt.key}
+              style={{ fontSize: "0.75rem", padding: "4px 8px" }}
+            >
+              {opt.label} {sortKey === opt.key ? (sortDir === "asc" ? "▲" : "▼") : ""}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="db-grid stagger-children">
-        {items.map(({ db, overview, activeAlerts }) => {
+        {sortedItems.map(({ db, overview, activeAlerts }) => {
           const current = overview?.snapshot?.connectionCount ?? 0;
           const max = overview?.snapshot?.maxConnections ?? 100;
           const utilization = overview?.utilization?.percent ?? 0;

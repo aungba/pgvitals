@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   getDatabase,
@@ -32,7 +32,7 @@ import SessionGroups from "../../components/SessionGroups";
 import Link from "next/link";
 
 /* ===================================================================
-   Database Detail — Main monitoring view
+   Database Detail — Enhanced Main Monitoring View
    =================================================================== */
 
 function formatTimestamp(ts: string): string {
@@ -70,6 +70,11 @@ export default function DatabaseDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [countdown, setCountdown] = useState(10);
+  const [selectedHistoricalTimestamp, setSelectedHistoricalTimestamp] = useState<string | null>(null);
+  const [replaySnapshotTimestamp, setReplaySnapshotTimestamp] = useState<string | null>(null);
+  const [replayLoading, setReplayLoading] = useState(false);
 
   const handleDelete = useCallback(async () => {
     if (!database) return;
@@ -90,18 +95,20 @@ export default function DatabaseDetailPage() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [db, ov, sess, snaps, hnts, als, schEvt] = await Promise.all([
+      const [db, ov, sessRes, snaps, hnts, als, schEvt] = await Promise.all([
         getDatabase(id),
         getOverview(id),
         getSessions(id),
-        getSnapshots(id, 100),
+        getSnapshots(id, 200),
         getHints(id),
         getActiveAlerts(id),
         getSchemaEvents(id).catch(() => ({ events: [] as SchemaEvent[] })),
       ]);
       setDatabase(db);
       setOverview(ov);
-      setSessions(sess);
+      if (!selectedHistoricalTimestamp) {
+        setSessions(sessRes.sessions);
+      }
       setSnapshots(snaps);
       setHints(hnts);
       setActiveAlerts(als);
@@ -111,50 +118,114 @@ export default function DatabaseDetailPage() {
       setError(e instanceof Error ? e.message : "Failed to fetch data");
     } finally {
       setLoading(false);
+      setCountdown(10);
     }
-  }, [id]);
+  }, [id, selectedHistoricalTimestamp]);
 
   useEffect(() => {
     fetchAll();
-    const interval = setInterval(fetchAll, 10_000);
-    return () => clearInterval(interval);
   }, [fetchAll]);
+
+  // Polling with countdown & pause capability (auto-pauses in time-travel mode)
+  useEffect(() => {
+    if (isPaused || selectedHistoricalTimestamp !== null) return;
+
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          fetchAll();
+          return 10;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isPaused, selectedHistoricalTimestamp, fetchAll]);
+
+  // Handle Point-in-Time Snapshot Selection
+  const handleSelectSnapshot = useCallback(async (ts: string | null) => {
+    if (!ts) {
+      setSelectedHistoricalTimestamp(null);
+      setReplaySnapshotTimestamp(null);
+      fetchAll();
+      return;
+    }
+
+    setSelectedHistoricalTimestamp(ts);
+    setReplayLoading(true);
+    try {
+      const res = await getSessions(id, ts);
+      setSessions(res.sessions);
+      setReplaySnapshotTimestamp(res.snapshotTimestamp ?? ts);
+    } catch {
+      // ignore
+    } finally {
+      setReplayLoading(false);
+    }
+  }, [id, fetchAll]);
+
+  // Find index of current historical snapshot in snapshots array for Prev / Next step
+  const currentSnapshotIndex = useMemo(() => {
+    if (!selectedHistoricalTimestamp || !snapshots.length) return -1;
+    const targetMs = new Date(selectedHistoricalTimestamp).getTime();
+    // Sort snapshots chronologically
+    const sorted = [...snapshots].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return sorted.findIndex((s) => Math.abs(new Date(s.timestamp).getTime() - targetMs) < 5000);
+  }, [selectedHistoricalTimestamp, snapshots]);
+
+  const sortedChronologicalSnapshots = useMemo(() => {
+    return [...snapshots].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  }, [snapshots]);
+
+  const handleStepSnapshot = (direction: "prev" | "next") => {
+    if (!sortedChronologicalSnapshots.length) return;
+    let newIndex = currentSnapshotIndex;
+    if (newIndex === -1) {
+      newIndex = sortedChronologicalSnapshots.length - 1;
+    }
+    if (direction === "prev" && newIndex > 0) {
+      handleSelectSnapshot(sortedChronologicalSnapshots[newIndex - 1].timestamp);
+    } else if (direction === "next") {
+      if (newIndex < sortedChronologicalSnapshots.length - 1) {
+        handleSelectSnapshot(sortedChronologicalSnapshots[newIndex + 1].timestamp);
+      } else {
+        handleSelectSnapshot(null); // Return to live
+      }
+    }
+  };
+
+  // Blocker chain detection
+  const rootBlockers = useMemo(() => {
+    const blockers = new Map<number, { session: Session; blockedPids: number[] }>();
+
+    for (const s of sessions) {
+      if (s.blockingPid) {
+        const root = sessions.find((x) => x.pid === s.blockingPid);
+        if (root) {
+          if (!blockers.has(root.pid)) {
+            blockers.set(root.pid, { session: root, blockedPids: [] });
+          }
+          blockers.get(root.pid)!.blockedPids.push(s.pid);
+        }
+      }
+    }
+
+    return Array.from(blockers.values());
+  }, [sessions]);
 
   if (loading) {
     return (
       <div className="animate-fade-in">
-        <div
-          className="skeleton"
-          style={{ width: 300, height: 32, marginBottom: 16 }}
-        />
-        <div
-          className="skeleton"
-          style={{ width: 160, height: 18, marginBottom: 40 }}
-        />
-        <div
-          className="stats-row"
-          style={{ marginBottom: "var(--space-xl)" }}
-        >
+        <div className="skeleton" style={{ width: 300, height: 32, marginBottom: 16 }} />
+        <div className="skeleton" style={{ width: 160, height: 18, marginBottom: 40 }} />
+        <div className="stats-row" style={{ marginBottom: "var(--space-xl)" }}>
           {[1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="skeleton"
-              style={{ height: 80, borderRadius: "var(--radius-lg)" }}
-            />
+            <div key={i} className="skeleton" style={{ height: 80, borderRadius: "var(--radius-lg)" }} />
           ))}
         </div>
-        <div
-          className="skeleton"
-          style={{
-            height: 360,
-            borderRadius: "var(--radius-lg)",
-            marginBottom: 24,
-          }}
-        />
-        <div
-          className="skeleton"
-          style={{ height: 300, borderRadius: "var(--radius-lg)" }}
-        />
+        <div className="skeleton" style={{ height: 360, borderRadius: "var(--radius-lg)", marginBottom: 24 }} />
+        <div className="skeleton" style={{ height: 300, borderRadius: "var(--radius-lg)" }} />
       </div>
     );
   }
@@ -162,11 +233,7 @@ export default function DatabaseDetailPage() {
   if (error) {
     return (
       <div>
-        <Link
-          href="/"
-          className="btn-secondary"
-          style={{ marginBottom: "var(--space-lg)", display: "inline-flex" }}
-        >
+        <Link href="/" className="btn-secondary" style={{ marginBottom: "var(--space-lg)", display: "inline-flex" }}>
           ← Back
         </Link>
         <div className="alert alert-error">
@@ -192,7 +259,7 @@ export default function DatabaseDetailPage() {
 
   return (
     <div className="animate-fade-in">
-      {/* ---------- Active Alerts ---------- */}
+      {/* ---------- Active Alerts Banner ---------- */}
       <AlertBanner alerts={activeAlerts} databaseId={id} />
 
       {/* ---------- Header ---------- */}
@@ -220,244 +287,32 @@ export default function DatabaseDetailPage() {
           </Link>
           <div>
             <h1>{database.name}</h1>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "var(--space-sm)",
-                marginTop: 4,
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", marginTop: 4 }}>
               <StatusBadge variant={database.environment} size="sm" />
               <StatusBadge variant={utilizationLabel} label={`${utilizationPercent}% utilized`} size="sm" dot />
             </div>
           </div>
         </div>
-        <div className="detail-header-right">
-          <div className="live-dot" />
-          <span>
-            Last updated:{" "}
-            {snap ? formatTimestamp(snap.timestamp) : "—"}
+
+        {/* Header Right: Live Refresh Controller & Settings */}
+        <div className="detail-header-right" style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", flexWrap: "wrap" }}>
+          {/* Refresh Controller */}
+          <div className="refresh-controller">
+            <div className={`live-dot ${isPaused ? "paused" : ""}`} style={{ opacity: isPaused ? 0.4 : 1 }} />
+            <span>{isPaused ? "Paused" : `Live (${countdown}s)`}</span>
+            <button
+              className="refresh-toggle-btn"
+              onClick={() => setIsPaused(!isPaused)}
+              title={isPaused ? "Resume auto-refresh" : "Pause auto-refresh"}
+            >
+              {isPaused ? "▶ Resume" : "⏸ Pause"}
+            </button>
+          </div>
+
+          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginLeft: 4 }}>
+            Updated: {snap ? formatTimestamp(snap.timestamp) : "—"}
           </span>
-          <Link
-            href={`/databases/${id}/queries`}
-            title="Query performance"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-alt)",
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-              fontSize: "0.9rem",
-              transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
-              flexShrink: 0,
-              textDecoration: "none",
-            }}
-          >
-            📊
-          </Link>
-          <Link
-            href={`/databases/${id}/indexes`}
-            title="Index advisor"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-alt)",
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-              fontSize: "0.9rem",
-              transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
-              flexShrink: 0,
-              textDecoration: "none",
-            }}
-          >
-            🗂️
-          </Link>
-          <Link
-            href={`/databases/${id}/health`}
-            title="Health & VACUUM"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-alt)",
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-              fontSize: "0.9rem",
-              transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
-              flexShrink: 0,
-              textDecoration: "none",
-            }}
-          >
-            🩺
-          </Link>
-          <Link
-            href={`/databases/${id}/alerts`}
-            title="Alert settings"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-alt)",
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-              fontSize: "0.9rem",
-              transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
-              flexShrink: 0,
-              textDecoration: "none",
-              position: "relative",
-            }}
-          >
-            🔔
-            {activeAlerts.length > 0 && (
-              <span
-                className={`alert-badge ${
-                  activeAlerts.some((a) => a.severity === "critical")
-                    ? "alert-badge-critical"
-                    : "alert-badge-warning"
-                }`}
-                style={{
-                  position: "absolute",
-                  top: -6,
-                  right: -6,
-                  fontSize: "0.6rem",
-                  minWidth: 16,
-                  height: 16,
-                  padding: "0 4px",
-                }}
-              >
-                {activeAlerts.length}
-              </span>
-            )}
-          </Link>
-          <Link
-            href={`/databases/${id}/logs`}
-            title="Log Insights"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-alt)",
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-              fontSize: "0.9rem",
-              transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
-              flexShrink: 0,
-              textDecoration: "none",
-            }}
-          >
-            📋
-          </Link>
-          <Link
-            href={`/databases/${id}/schema`}
-            title="Schema Changes"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-alt)",
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-              fontSize: "0.9rem",
-              transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
-              flexShrink: 0,
-              textDecoration: "none",
-            }}
-          >
-            📐
-          </Link>
-          <Link
-            href={`/databases/${id}/plans`}
-            title="Plan Regression"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-alt)",
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-              fontSize: "0.9rem",
-              transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
-              flexShrink: 0,
-              textDecoration: "none",
-            }}
-          >
-            🔀
-          </Link>
-          <Link
-            href={`/databases/${id}/costs`}
-            title="Cost Estimator"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-alt)",
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-              fontSize: "0.9rem",
-              transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
-              flexShrink: 0,
-              textDecoration: "none",
-            }}
-          >
-            💰
-          </Link>
-          <Link
-            href={`/databases/${id}/pooler`}
-            title="PgBouncer Pools"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "var(--radius-md)",
-              background: "var(--surface-alt)",
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-              fontSize: "0.9rem",
-              transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
-              flexShrink: 0,
-              textDecoration: "none",
-            }}
-          >
-            🔌
-          </Link>
+
           <button
             onClick={handleDelete}
             disabled={deleting}
@@ -466,18 +321,18 @@ export default function DatabaseDetailPage() {
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              width: 36,
-              height: 36,
+              width: 32,
+              height: 32,
               borderRadius: "var(--radius-md)",
               background: "var(--signal-critical-dim)",
               border: "1px solid color-mix(in srgb, var(--signal-critical) 25%, transparent)",
               color: "var(--signal-critical)",
-              fontSize: "0.9rem",
+              fontSize: "0.85rem",
               cursor: deleting ? "not-allowed" : "pointer",
               opacity: deleting ? 0.5 : 1,
               transition: "all var(--transition-fast)",
-              marginLeft: "var(--space-sm)",
               flexShrink: 0,
+              marginLeft: 4,
             }}
           >
             {deleting ? "…" : "🗑"}
@@ -485,7 +340,73 @@ export default function DatabaseDetailPage() {
         </div>
       </div>
 
-      {/* ---------- Stats Row ---------- */}
+      {/* ---------- Feature Sub-Navigation Bar ---------- */}
+      <nav className="feature-subnav" aria-label="Database navigation">
+        <Link href={`/databases/${id}/queries`} className="feature-subnav-item">
+          📊 Queries
+        </Link>
+        <Link href={`/databases/${id}/indexes`} className="feature-subnav-item">
+          🗂️ Index Advisor
+        </Link>
+        <Link href={`/databases/${id}/health`} className="feature-subnav-item">
+          🩺 Health & VACUUM
+        </Link>
+        <Link href={`/databases/${id}/alerts`} className="feature-subnav-item">
+          🔔 Alerts
+          {activeAlerts.length > 0 && (
+            <span className="feature-subnav-badge">{activeAlerts.length}</span>
+          )}
+        </Link>
+        <Link href={`/databases/${id}/logs`} className="feature-subnav-item">
+          📋 Log Insights
+        </Link>
+        <Link href={`/databases/${id}/schema`} className="feature-subnav-item">
+          📐 Schema Diffs
+        </Link>
+        <Link href={`/databases/${id}/plans`} className="feature-subnav-item">
+          🔀 Plan Regressions
+        </Link>
+        <Link href={`/databases/${id}/costs`} className="feature-subnav-item">
+          💰 Cost Estimator
+        </Link>
+        <Link href={`/databases/${id}/pooler`} className="feature-subnav-item">
+          🔌 PgBouncer
+        </Link>
+      </nav>
+
+      {/* ---------- Root Blocker Diagnostic Alert Banner ---------- */}
+      {rootBlockers.length > 0 && (
+        <div className="blocker-alert-box">
+          <div className="blocker-alert-icon">⛔</div>
+          <div className="blocker-alert-content">
+            <div className="blocker-alert-title">
+              Active Blocking Lock Chain Detected ({rootBlockers.length} root blocker{rootBlockers.length !== 1 ? "s" : ""})
+            </div>
+            {rootBlockers.map(({ session, blockedPids }) => (
+              <div key={session.pid} style={{ marginTop: 6 }}>
+                <div className="blocker-alert-desc">
+                  <strong>PID {session.pid}</strong> ({session.usename || "unknown user"}, {session.applicationName || "unnamed app"}) is in state{" "}
+                  <code style={{ background: "var(--surface)", padding: "1px 4px", borderRadius: 3, fontFamily: "var(--font-mono)" }}>
+                    {session.state}
+                  </code>{" "}
+                  for {Math.round(session.stateDurationSeconds)}s and is holding locks blocking{" "}
+                  <strong>{blockedPids.length} session{blockedPids.length !== 1 ? "s" : ""}</strong>.
+                </div>
+                <div className="blocker-alert-pids">
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", alignSelf: "center" }}>Blocked PIDs:</span>
+                  {blockedPids.map((bPid) => (
+                    <span key={bPid} className="blocker-alert-pill">
+                      PID {bPid}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Connection Stats Row ---------- */}
       <div className="stats-row stagger-children">
         <StatsCard
           label="Total"
@@ -583,12 +504,18 @@ export default function DatabaseDetailPage() {
                 ? "var(--signal-critical)"
                 : "var(--signal-healthy)"
             }
+            subtitle={
+              (overview.health.deadlocksCount ?? 0) > 0
+                ? "Click to view events →"
+                : undefined
+            }
+            href={`/databases/${id}/logs?filter=deadlock`}
           />
         </div>
       )}
 
-      {/* ---------- Gauge + Hints ---------- */}
-      <div className="detail-grid" style={{ marginBottom: "var(--space-xl)" }}>
+      {/* ---------- Gauge + Root Cause Hints ---------- */}
+      <div className="detail-grid" style={{ marginBottom: "var(--space-xl)", marginTop: "var(--space-md)" }}>
         {/* Gauge */}
         <div
           className="glass-card-static"
@@ -600,18 +527,10 @@ export default function DatabaseDetailPage() {
             justifyContent: "center",
           }}
         >
-          <div
-            className="section-title"
-            style={{ alignSelf: "flex-start", marginBottom: "var(--space-md)" }}
-          >
+          <div className="section-title" style={{ alignSelf: "flex-start", marginBottom: "var(--space-md)" }}>
             Connection Utilization
           </div>
-          <ConnectionGauge
-            current={current}
-            max={max}
-            size={200}
-            strokeWidth={12}
-          />
+          <ConnectionGauge current={current} max={max} size={200} strokeWidth={12} />
         </div>
 
         {/* Hints */}
@@ -664,37 +583,111 @@ export default function DatabaseDetailPage() {
                 justifyContent: "center",
               }}
             >
-              <div style={{ fontSize: "2rem", marginBottom: 8, opacity: 0.5 }}>
-                ✅
-              </div>
-              <div style={{ fontSize: "0.9rem" }}>
-                No issues detected — everything looks healthy
-              </div>
+              <div style={{ fontSize: "2rem", marginBottom: 8, opacity: 0.5 }}>✅</div>
+              <div style={{ fontSize: "0.9rem" }}>No issues detected — everything looks healthy</div>
             </div>
           )}
         </div>
       </div>
 
-      {/* ---------- Connection Chart ---------- */}
+      {/* ---------- Connection History Chart ---------- */}
       <div className="chart-section">
-        <div className="section-title">Connection History</div>
-        <ConnectionChart snapshots={snapshots} schemaEvents={schemaEvents} />
+        <div className="section-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Connection History</span>
+          {selectedHistoricalTimestamp && (
+            <button
+              onClick={() => handleSelectSnapshot(null)}
+              className="btn-secondary"
+              style={{ fontSize: "0.75rem", padding: "3px 10px", borderRadius: "var(--radius-full)" }}
+            >
+              ● Return to Live
+            </button>
+          )}
+        </div>
+        <ConnectionChart
+          snapshots={snapshots}
+          schemaEvents={schemaEvents}
+          selectedTimestamp={selectedHistoricalTimestamp}
+          onSelectTimestamp={handleSelectSnapshot}
+        />
       </div>
+
+      {/* ---------- Time-Travel Replay Banner ---------- */}
+      {selectedHistoricalTimestamp && (
+        <div
+          className="animate-fade-in"
+          style={{
+            background: "var(--brand-dim)",
+            border: "1px solid var(--brand)",
+            borderRadius: "var(--radius-md)",
+            padding: "var(--space-md) var(--space-lg)",
+            marginBottom: "var(--space-lg)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "var(--space-md)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+            <span style={{ fontSize: "1.2rem" }}>⏱️</span>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--brand)" }}>
+                Time-Travel Snapshot Replay Mode
+              </div>
+              <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 2 }}>
+                Viewing snapshot from{" "}
+                <strong style={{ color: "var(--text-primary)" }}>
+                  {formatTimestamp(replaySnapshotTimestamp ?? selectedHistoricalTimestamp)}
+                </strong>
+                {replayLoading && <span style={{ marginLeft: 8, color: "var(--text-muted)" }}>Loading…</span>}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+            <button
+              onClick={() => handleStepSnapshot("prev")}
+              disabled={currentSnapshotIndex === 0}
+              className="btn-secondary"
+              style={{ fontSize: "0.8rem", padding: "4px 10px" }}
+              title="Previous snapshot (10s earlier)"
+            >
+              ◀ Prev
+            </button>
+            <button
+              onClick={() => handleStepSnapshot("next")}
+              className="btn-secondary"
+              style={{ fontSize: "0.8rem", padding: "4px 10px" }}
+              title="Next snapshot (10s later)"
+            >
+              Next ▶
+            </button>
+            <button
+              onClick={() => handleSelectSnapshot(null)}
+              className="btn-primary"
+              style={{ fontSize: "0.8rem", padding: "4px 12px" }}
+            >
+              ● Resume Live
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ---------- Session Grouping ---------- */}
       <div style={{ marginBottom: "var(--space-xl)" }}>
         <SessionGroups sessions={sessions} maxConnections={max} />
       </div>
 
-      {/* ---------- Sessions Table ---------- */}
+      {/* ---------- Sessions Table with Search & Filters ---------- */}
       <div>
         <div className="section-title">
-          Active Sessions{" "}
+          {selectedHistoricalTimestamp ? "Historical Sessions Snapshot" : "Active Sessions"}{" "}
           {sessions.length > 0 && (
             <span
               style={{
-                background: "var(--brand-dim)",
-                color: "var(--brand)",
+                background: selectedHistoricalTimestamp ? "var(--signal-warning-dim)" : "var(--brand-dim)",
+                color: selectedHistoricalTimestamp ? "var(--signal-warning)" : "var(--brand)",
                 padding: "1px 8px",
                 borderRadius: "9999px",
                 fontSize: "0.7rem",

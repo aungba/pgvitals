@@ -113,41 +113,68 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
   );
 
   /**
-   * GET /api/databases/:id/sessions — Latest sessions with blocking info.
+   * GET /api/databases/:id/sessions — Latest or historical sessions with blocking info.
+   * Query params: timestamp (ISO) or snapshotId for historical replay.
    */
-  app.get<{ Params: { id: string } }>(
+  app.get<{
+    Params: { id: string };
+    Querystring: { timestamp?: string; snapshotId?: string };
+  }>(
     "/api/databases/:id/sessions",
     { preHandler: [authMiddleware] },
     async (request, reply) => {
       try {
         const { id } = request.params;
+        const { timestamp: requestedTimestamp, snapshotId: requestedSnapshotId } = request.query;
 
         // Verify database belongs to this org
         if (!await verifyDbOwnership(id, request.auth.orgId)) {
           return reply.status(404).send({ error: "Database not found" });
         }
 
-        // Get the latest snapshot for this database
-        const [latestSnapshot] = await db
-          .select({ id: snapshots.id })
-          .from(snapshots)
-          .where(eq(snapshots.monitoredDbId, id))
-          .orderBy(desc(snapshots.timestamp))
-          .limit(1);
+        let targetSnapshot: { id: string; timestamp: Date } | undefined;
 
-        if (!latestSnapshot) {
-          return reply.send({ sessions: [] });
+        if (requestedSnapshotId) {
+          const [found] = await db
+            .select({ id: snapshots.id, timestamp: snapshots.timestamp })
+            .from(snapshots)
+            .where(and(eq(snapshots.monitoredDbId, id), eq(snapshots.id, requestedSnapshotId)))
+            .limit(1);
+          targetSnapshot = found;
+        } else if (requestedTimestamp) {
+          const targetDate = new Date(requestedTimestamp);
+          const [found] = await db
+            .select({ id: snapshots.id, timestamp: snapshots.timestamp })
+            .from(snapshots)
+            .where(and(eq(snapshots.monitoredDbId, id), lte(snapshots.timestamp, targetDate)))
+            .orderBy(desc(snapshots.timestamp))
+            .limit(1);
+          targetSnapshot = found;
+        } else {
+          // Get the latest snapshot for this database
+          const [latestSnapshot] = await db
+            .select({ id: snapshots.id, timestamp: snapshots.timestamp })
+            .from(snapshots)
+            .where(eq(snapshots.monitoredDbId, id))
+            .orderBy(desc(snapshots.timestamp))
+            .limit(1);
+          targetSnapshot = latestSnapshot;
+        }
+
+        if (!targetSnapshot) {
+          return reply.send({ snapshotId: null, snapshotTimestamp: null, sessions: [] });
         }
 
         // Fetch sessions for this snapshot
         const sessions = await db
           .select()
           .from(sessionsSnapshot)
-          .where(eq(sessionsSnapshot.snapshotId, latestSnapshot.id))
+          .where(eq(sessionsSnapshot.snapshotId, targetSnapshot.id))
           .orderBy(desc(sessionsSnapshot.stateDurationSeconds));
 
         return reply.send({
-          snapshotId: latestSnapshot.id,
+          snapshotId: targetSnapshot.id,
+          snapshotTimestamp: targetSnapshot.timestamp,
           sessions: sessions.map((s) => ({
             pid: s.pid,
             usename: s.usename,

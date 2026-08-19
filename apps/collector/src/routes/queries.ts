@@ -2,12 +2,15 @@ import type { FastifyInstance } from "fastify";
 import { db, queryStats, explainCaptures, querySuggestions, monitoredDatabases, queryPlanSnapshots } from "@pgvitals/db";
 import { eq, and, desc, gte, sql, inArray } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
+import { safeQuery } from "../lib/safe-query.js";
 import { config } from "../config.js";
 import { checkPgStatStatements } from "../collector/query-stats-collector.js";
 import { captureExplain } from "../collector/explain-capture.js";
+import { estimatePercentiles } from "../collector/percentile-calculator.js";
 import { authMiddleware, requireRole } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
 import { estimateQueryCosts } from "../lib/cost-model.js";
+import { analyzePlanRegression } from "../collector/plan-regression-collector.js";
 
 /* ===================================================================
    Query Performance Routes — Phase 4
@@ -480,7 +483,7 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
         }
 
         // Fetch all queries from latest snapshot
-        const queries = await db
+        const rawQueries = await db
           .select()
           .from(queryStats)
           .where(
@@ -491,6 +494,35 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
           )
           .orderBy(desc(queryStats.totalTimeMs))
           .limit(50);
+
+        // Aggregate by queryid to merge multiple entries (e.g., from different roles/toplevel)
+        const queryMap = new Map<number, {
+          queryid: number;
+          queryText: string;
+          calls: number;
+          totalTimeMs: number;
+          sharedBlksRead: number;
+        }>();
+        for (const q of rawQueries) {
+          const existing = queryMap.get(q.queryid);
+          if (existing) {
+            existing.calls += q.calls;
+            existing.totalTimeMs += q.totalTimeMs;
+            existing.sharedBlksRead += q.sharedBlksRead;
+            if (!existing.queryText && q.queryText) {
+              existing.queryText = q.queryText;
+            }
+          } else {
+            queryMap.set(q.queryid, {
+              queryid: q.queryid,
+              queryText: q.queryText,
+              calls: q.calls,
+              totalTimeMs: q.totalTimeMs,
+              sharedBlksRead: q.sharedBlksRead,
+            });
+          }
+        }
+        const queries = Array.from(queryMap.values());
 
         // Build custom cost model if params provided
         const customModel = {
@@ -512,13 +544,7 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
           : undefined;
 
         const estimates = estimateQueryCosts(
-          queries.map((q) => ({
-            queryid: q.queryid,
-            queryText: q.queryText,
-            calls: q.calls,
-            totalTimeMs: q.totalTimeMs,
-            sharedBlksRead: q.sharedBlksRead,
-          })),
+          queries,
           24, // assume 24h snapshot window
           costModelArg
         );
@@ -586,13 +612,32 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
           .orderBy(desc(queryPlanSnapshots.capturedAt))
           .limit(50);
 
-        // Detect regressions between consecutive snapshots
+        // Detect regressions between consecutive snapshots using multi-factor analyzer
         const plansWithRegression = plans.map((plan, i) => {
           const next = plans[i + 1]; // next is older
           let regression: string | null = null;
-          if (next && plan.planShapeHash !== next.planShapeHash) {
-            regression = `Plan changed from ${next.topNodeType ?? "unknown"} to ${plan.topNodeType ?? "unknown"}`;
+          let regressionAnalysis: ReturnType<typeof analyzePlanRegression> = null;
+
+          if (next) {
+            regressionAnalysis = analyzePlanRegression(
+              {
+                topNodeType: next.topNodeType,
+                planShapeHash: next.planShapeHash,
+                estimatedCost: next.estimatedCost,
+                planFlags: next.planFlags as Record<string, unknown> | null,
+              },
+              {
+                topNodeType: plan.topNodeType,
+                planShapeHash: plan.planShapeHash,
+                estimatedCost: plan.estimatedCost,
+                planFlags: plan.planFlags as Record<string, unknown> | null,
+              }
+            );
+            if (regressionAnalysis?.isRegression) {
+              regression = `${regressionAnalysis.summary}: ${regressionAnalysis.reason}`;
+            }
           }
+
           return {
             id: plan.id,
             queryid: plan.queryid,
@@ -600,9 +645,10 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
             planShapeHash: plan.planShapeHash,
             estimatedCost: plan.estimatedCost,
             topNodeType: plan.topNodeType,
-            planFlags: plan.planFlags,
+            planFlags: plan.planFlags as Record<string, unknown> | null,
             planJson: plan.planJson,
             regression,
+            regressionAnalysis: regressionAnalysis?.isRegression ? regressionAnalysis : null,
           };
         });
 
@@ -613,8 +659,233 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
       }
     }
   );
-}
 
+  /**
+   * GET /api/databases/:id/queries/percentiles
+   * Returns estimated P50, P95, P99, and variance metrics for top queries.
+   * Spec §3 & §7
+   */
+  app.get<{
+    Params: { id: string };
+    Querystring: { limit?: string; offset?: string };
+  }>(
+    "/api/databases/:id/queries/percentiles",
+    { preHandler: [authMiddleware, requireFeature("queryPerformanceEnabled")] },
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+        const limit = Math.min(parseInt(request.query.limit ?? "50", 10), 200);
+        const offset = parseInt(request.query.offset ?? "0", 10);
+
+        if (!(await verifyDbOwnership(id, request.auth.orgId))) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const [latestCapture] = await db
+          .select({ capturedAt: queryStats.capturedAt })
+          .from(queryStats)
+          .where(eq(queryStats.monitoredDbId, id))
+          .orderBy(desc(queryStats.capturedAt))
+          .limit(1);
+
+        if (!latestCapture) {
+          return reply.send({ queries: [], latestCapturedAt: null });
+        }
+
+        const queries = await db
+          .select()
+          .from(queryStats)
+          .where(
+            and(
+              eq(queryStats.monitoredDbId, id),
+              eq(queryStats.capturedAt, latestCapture.capturedAt)
+            )
+          )
+          .orderBy(desc(queryStats.totalTimeMs))
+          .limit(limit)
+          .offset(offset);
+
+        return reply.send({
+          queries: queries.map((q) => {
+            const calculated = estimatePercentiles(
+              q.meanTimeMs,
+              q.stddevExecTime ?? 0,
+              q.minTimeMs,
+              q.maxTimeMs
+            );
+            const p95 = q.p95ExecTime ?? calculated.p95;
+            const p99 = q.p99ExecTime ?? calculated.p99;
+            const p50 = calculated.p50;
+            const varianceRatio =
+              q.varianceRatio ?? calculated.varianceRatio;
+            const isHighVariance =
+              varianceRatio > 10.0 && q.maxTimeMs > 500;
+
+            return {
+              id: q.id,
+              queryid: q.queryid,
+              queryText: q.queryText,
+              calls: q.calls,
+              totalTimeMs: q.totalTimeMs,
+              meanTimeMs: q.meanTimeMs,
+              minTimeMs: q.minTimeMs,
+              maxTimeMs: q.maxTimeMs,
+              stddevExecTime: q.stddevExecTime ?? 0,
+              p50ExecTime: p50,
+              p95ExecTime: p95,
+              p99ExecTime: p99,
+              varianceRatio,
+              isHighVariance,
+              capturedAt: q.capturedAt.toISOString(),
+            };
+          }),
+          latestCapturedAt: latestCapture.capturedAt.toISOString(),
+        });
+      } catch (err) {
+        request.log.error({ err }, "Failed to get query percentiles");
+        return reply.status(500).send({ error: "Failed to get query percentiles" });
+      }
+    }
+  );
+
+  /**
+   * GET /api/databases/:id/io-diagnostics
+   * Returns block read/write metrics, I/O wait percentages, and track_io_timing status.
+   * Spec §4 & §7
+   */
+  app.get<{ Params: { id: string } }>(
+    "/api/databases/:id/io-diagnostics",
+    { preHandler: [authMiddleware, requireFeature("queryPerformanceEnabled")] },
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+
+        if (!(await verifyDbOwnership(id, request.auth.orgId))) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const [monitoredDb] = await db
+          .select()
+          .from(monitoredDatabases)
+          .where(eq(monitoredDatabases.id, id))
+          .limit(1);
+
+        if (!monitoredDb) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const connectionString = decrypt(
+          monitoredDb.connectionStringEncrypted,
+          config.encryptionKey
+        );
+
+        // Check track_io_timing setting on database
+        let trackIoTimingSetting = "off";
+        try {
+          const settingRows = await safeQuery<Array<{ setting: string }>>(
+            connectionString,
+            `SELECT setting FROM pg_settings WHERE name = 'track_io_timing'`,
+            { timeoutMs: 5000 }
+          );
+          if (settingRows.length > 0) {
+            trackIoTimingSetting = settingRows[0].setting;
+          }
+        } catch (err) {
+          request.log.debug({ err, id }, "Failed to query track_io_timing setting");
+        }
+
+        // Get latest query stats for this database
+        const [latestCapture] = await db
+          .select({ capturedAt: queryStats.capturedAt })
+          .from(queryStats)
+          .where(eq(queryStats.monitoredDbId, id))
+          .orderBy(desc(queryStats.capturedAt))
+          .limit(1);
+
+        if (!latestCapture) {
+          return reply.send({
+            trackIoTimingEnabled: trackIoTimingSetting === "on",
+            trackIoTimingSetting,
+            topIoQueries: [],
+            summary: {
+              totalReadTimeMs: 0,
+              totalWriteTimeMs: 0,
+              totalIoTimeMs: 0,
+              queriesWithStalls: 0,
+            },
+            latestCapturedAt: null,
+          });
+        }
+
+        const queries = await db
+          .select()
+          .from(queryStats)
+          .where(
+            and(
+              eq(queryStats.monitoredDbId, id),
+              eq(queryStats.capturedAt, latestCapture.capturedAt)
+            )
+          )
+          .orderBy(
+            desc(
+              sql`COALESCE(${queryStats.blkReadTime}, 0) + COALESCE(${queryStats.blkWriteTime}, 0)`
+            )
+          )
+          .limit(50);
+
+        let totalReadTimeMs = 0;
+        let totalWriteTimeMs = 0;
+        let queriesWithStalls = 0;
+
+        const topIoQueries = queries.map((q) => {
+          const readTime = q.blkReadTime ?? 0;
+          const writeTime = q.blkWriteTime ?? 0;
+          const ioPercent =
+            q.ioTimePercentage ??
+            (q.totalTimeMs > 0
+              ? ((readTime + writeTime) / q.totalTimeMs) * 100
+              : 0);
+          const isStall = ioPercent >= 45.0 && q.totalTimeMs > 1500;
+
+          totalReadTimeMs += readTime;
+          totalWriteTimeMs += writeTime;
+          if (isStall) queriesWithStalls++;
+
+          return {
+            queryid: q.queryid,
+            queryText: q.queryText,
+            calls: q.calls,
+            totalTimeMs: q.totalTimeMs,
+            meanTimeMs: q.meanTimeMs,
+            sharedBlksHit: q.sharedBlksHit,
+            sharedBlksRead: q.sharedBlksRead,
+            blkReadTime: readTime,
+            blkWriteTime: writeTime,
+            ioTimePercentage: Math.round(ioPercent * 10) / 10,
+            isStall,
+          };
+        });
+
+        return reply.send({
+          trackIoTimingEnabled: trackIoTimingSetting === "on",
+          trackIoTimingSetting,
+          topIoQueries,
+          summary: {
+            totalReadTimeMs: Math.round(totalReadTimeMs * 100) / 100,
+            totalWriteTimeMs: Math.round(totalWriteTimeMs * 100) / 100,
+            totalIoTimeMs:
+              Math.round((totalReadTimeMs + totalWriteTimeMs) * 100) / 100,
+            queriesWithStalls,
+          },
+          latestCapturedAt: latestCapture.capturedAt.toISOString(),
+        });
+      } catch (err) {
+        request.log.error({ err }, "Failed to get I/O diagnostics");
+        return reply.status(500).send({ error: "Failed to get I/O diagnostics" });
+      }
+    }
+  );
+}
 
 /** Serializes a queryStats row for API response (converts Date and bigint). */
 function serializeQueryStat(row: typeof queryStats.$inferSelect) {
@@ -630,11 +901,21 @@ function serializeQueryStat(row: typeof queryStats.$inferSelect) {
     maxTimeMs: row.maxTimeMs,
     minTimeMs: row.minTimeMs,
     rowsReturned: row.rowsReturned,
-    rowsPerCall: row.calls > 0 ? Math.round((row.rowsReturned / row.calls) * 100) / 100 : 0,
+    rowsPerCall:
+      row.calls > 0
+        ? Math.round((row.rowsReturned / row.calls) * 100) / 100
+        : 0,
     sharedBlksHit: row.sharedBlksHit,
     sharedBlksRead: row.sharedBlksRead,
     tempBlksWritten: row.tempBlksWritten,
     pctOfTotalTime: row.pctOfTotalTime,
+    stddevExecTime: row.stddevExecTime ?? null,
+    p95ExecTime: row.p95ExecTime ?? null,
+    p99ExecTime: row.p99ExecTime ?? null,
+    varianceRatio: row.varianceRatio ?? null,
+    blkReadTime: row.blkReadTime ?? null,
+    blkWriteTime: row.blkWriteTime ?? null,
+    ioTimePercentage: row.ioTimePercentage ?? null,
   };
 }
 
@@ -653,3 +934,4 @@ function serializeSuggestion(row: typeof querySuggestions.$inferSelect) {
     dismissed: row.dismissed,
   };
 }
+

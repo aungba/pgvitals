@@ -8,6 +8,8 @@ import {
   bigint,
   jsonb,
   primaryKey,
+  boolean,
+  text,
 } from "drizzle-orm/pg-core";
 import { monitoredDatabases } from "./organizations.js";
 
@@ -105,3 +107,23 @@ export const dbHealthSnapshots = pgTable("db_health_snapshots", {
   xidPercentUsed: doublePrecision("xid_percent_used"),
   metrics: jsonb("metrics").default({}).notNull(),
 });
+
+/**
+ * Autovacuum starvation events — records worker pool saturation and starved candidate tables.
+ * Spec §5.3 — Autovacuum Starvation & Worker Contention Sentinel
+ */
+export const autovacuumStarvationEvents = pgTable("autovacuum_starvation_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  monitoredDbId: uuid("monitored_db_id")
+    .references(() => monitoredDatabases.id, { onDelete: "cascade" })
+    .notNull(),
+  tableName: text("table_name").notNull(),
+  deadTuples: bigint("dead_tuples", { mode: "number" }).notNull(),
+  deadTupleRatio: doublePrecision("dead_tuple_ratio").notNull(),
+  activeWorkers: integer("active_workers").notNull(),
+  maxWorkers: integer("max_workers").notNull(),
+  isWorkerSaturated: boolean("is_worker_saturated").notNull(),
+  suggestedAction: text("suggested_action").notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).defaultNow().notNull(),
+});
+

@@ -55,11 +55,71 @@ export default function CostEstimatorPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const [sortKey, setSortKey] = useState<"total" | "io" | "cpu" | "calls" | "query">("total");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
   const sorted = [...estimates].sort((a, b) => {
-    if (sortBy === "io") return b.estimatedIoCostPerMonth - a.estimatedIoCostPerMonth;
-    if (sortBy === "cpu") return b.estimatedCpuCostPerMonth - a.estimatedCpuCostPerMonth;
-    return b.estimatedTotalCostPerMonth - a.estimatedTotalCostPerMonth;
+    const dir = sortDir === "asc" ? 1 : -1;
+    switch (sortKey) {
+      case "query":
+        return dir * a.queryText.localeCompare(b.queryText);
+      case "calls":
+        return dir * (a.calls - b.calls);
+      case "io":
+        return dir * (a.estimatedIoCostPerMonth - b.estimatedIoCostPerMonth);
+      case "cpu":
+        return dir * (a.estimatedCpuCostPerMonth - b.estimatedCpuCostPerMonth);
+      case "total":
+      default:
+        return dir * (a.estimatedTotalCostPerMonth - b.estimatedTotalCostPerMonth);
+    }
   });
+
+  function handleSort(key: typeof sortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
+
+  function SortHeader({
+    label,
+    k,
+    align = "left",
+    style,
+  }: {
+    label: string;
+    k: typeof sortKey;
+    align?: "left" | "right";
+    style?: React.CSSProperties;
+  }) {
+    const isActive = sortKey === k;
+    return (
+      <th
+        onClick={() => handleSort(k)}
+        style={{
+          padding: "var(--space-md) var(--space-lg)",
+          color: "var(--text-muted)",
+          fontWeight: 600,
+          fontSize: "0.75rem",
+          textTransform: "uppercase",
+          textAlign: align,
+          cursor: "pointer",
+          userSelect: "none",
+          ...style,
+        }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, justifyContent: align === "right" ? "flex-end" : "flex-start", width: "100%" }}>
+          {label}
+          <span style={{ fontSize: "0.7rem", color: isActive ? "var(--brand)" : "var(--text-muted)", opacity: isActive ? 1 : 0.4 }}>
+            {isActive ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+          </span>
+        </span>
+      </th>
+    );
+  }
 
   const totalMonthlyCost = estimates.reduce((s, e) => s + e.estimatedTotalCostPerMonth, 0);
   const totalIoCost = estimates.reduce((s, e) => s + e.estimatedIoCostPerMonth, 0);
@@ -146,20 +206,28 @@ export default function CostEstimatorPage() {
         </div>
       </div>
 
-      {/* Sort */}
+      {/* Quick Sort Tabs */}
       <div style={{ display: "flex", gap: "var(--space-sm)", marginBottom: "var(--space-lg)" }}>
         {[
           { key: "total" as const, label: "Total Cost" },
           { key: "io" as const, label: "I/O Cost" },
           { key: "cpu" as const, label: "CPU Cost" },
+          { key: "calls" as const, label: "Calls" },
         ].map((opt) => (
           <button
             key={opt.key}
-            onClick={() => setSortBy(opt.key)}
-            className={sortBy === opt.key ? "btn-primary" : "btn-secondary"}
+            onClick={() => {
+              if (sortKey === opt.key) {
+                setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+              } else {
+                setSortKey(opt.key);
+                setSortDir("desc");
+              }
+            }}
+            className={sortKey === opt.key ? "btn-primary" : "btn-secondary"}
             style={{ padding: "6px 14px", fontSize: "0.8rem", borderRadius: "var(--radius-md)" }}
           >
-            {opt.label}
+            {opt.label} {sortKey === opt.key ? (sortDir === "asc" ? "▲" : "▼") : ""}
           </button>
         ))}
       </div>
@@ -181,11 +249,11 @@ export default function CostEstimatorPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid var(--border)", textAlign: "left" }}>
-                  <th style={{ padding: "var(--space-md) var(--space-lg)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase" }}>Query</th>
-                  <th style={{ padding: "var(--space-md)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase", textAlign: "right" }}>Calls</th>
-                  <th style={{ padding: "var(--space-md)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase", textAlign: "right" }}>I/O</th>
-                  <th style={{ padding: "var(--space-md)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase", textAlign: "right" }}>CPU</th>
-                  <th style={{ padding: "var(--space-md) var(--space-lg)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase", textAlign: "right" }}>Total/Month</th>
+                  <SortHeader label="Query" k="query" />
+                  <SortHeader label="Calls" k="calls" align="right" style={{ padding: "var(--space-md)", width: 100 }} />
+                  <SortHeader label="I/O" k="io" align="right" style={{ padding: "var(--space-md)", width: 110 }} />
+                  <SortHeader label="CPU" k="cpu" align="right" style={{ padding: "var(--space-md)", width: 110 }} />
+                  <SortHeader label="Total/Month" k="total" align="right" style={{ width: 140 }} />
                 </tr>
               </thead>
               <tbody>
@@ -194,7 +262,7 @@ export default function CostEstimatorPage() {
                     ? (q.estimatedTotalCostPerMonth / totalMonthlyCost) * 100
                     : 0;
                   return (
-                    <tr key={q.queryid} style={{
+                    <tr key={`${q.queryid}-${i}`} style={{
                       borderBottom: "1px solid var(--border)",
                       background: i % 2 === 0 ? "transparent" : "var(--surface-alt)",
                     }}>

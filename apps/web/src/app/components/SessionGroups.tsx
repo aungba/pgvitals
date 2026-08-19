@@ -34,6 +34,10 @@ export default function SessionGroups({
   maxConnections,
 }: SessionGroupsProps) {
   const [groupBy, setGroupBy] = useState<GroupBy>("applicationName");
+  const [sortKey, setSortKey] = useState<
+    "name" | "total" | "active" | "idle" | "idleInTxn" | "percent"
+  >("total");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const groups = useMemo((): GroupData[] => {
     const map = new Map<
@@ -73,14 +77,75 @@ export default function SessionGroups({
       map.set(key, existing);
     }
 
-    return Array.from(map.entries())
-      .map(([name, data]) => ({
-        name,
-        ...data,
-        percent: maxConnections > 0 ? Math.round((data.total / maxConnections) * 100) : 0,
-      }))
-      .sort((a, b) => b.total - a.total);
-  }, [sessions, groupBy, maxConnections]);
+    const list = Array.from(map.entries()).map(([name, data]) => ({
+      name,
+      ...data,
+      percent:
+        maxConnections > 0
+          ? Math.round((data.total / maxConnections) * 100)
+          : 0,
+    }));
+
+    return list.sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      switch (sortKey) {
+        case "name":
+          return dir * a.name.localeCompare(b.name);
+        case "active":
+          return dir * (a.active - b.active);
+        case "idle":
+          return dir * (a.idle - b.idle);
+        case "idleInTxn":
+          return dir * (a.idleInTxn - b.idleInTxn);
+        case "percent":
+          return dir * (a.percent - b.percent);
+        case "total":
+        default:
+          return dir * (a.total - b.total);
+      }
+    });
+  }, [sessions, groupBy, maxConnections, sortKey, sortDir]);
+
+  function handleSort(key: typeof sortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
+
+  function SortHeader({
+    label,
+    k,
+    style,
+  }: {
+    label: string;
+    k: typeof sortKey;
+    style?: React.CSSProperties;
+  }) {
+    const isActive = sortKey === k;
+    return (
+      <th
+        className="alert-table-th"
+        onClick={() => handleSort(k)}
+        style={{ ...style, cursor: "pointer", userSelect: "none" }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          {label}
+          <span
+            style={{
+              fontSize: "0.7rem",
+              color: isActive ? "var(--brand)" : "var(--text-muted)",
+              opacity: isActive ? 1 : 0.4,
+            }}
+          >
+            {isActive ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+          </span>
+        </span>
+      </th>
+    );
+  }
 
   if (!sessions.length) return null;
 
@@ -98,15 +163,17 @@ export default function SessionGroups({
           Connection Breakdown
         </div>
         <div className="tab-bar">
-          {(Object.keys(GROUP_LABELS) as GroupBy[]).map((key) => (
-            <button
-              key={key}
-              className={`tab-button ${groupBy === key ? "active" : ""}`}
-              onClick={() => setGroupBy(key)}
-            >
-              {GROUP_LABELS[key]}
-            </button>
-          ))}
+          {(["applicationName", "usename", "clientAddr"] as GroupBy[]).map(
+            (key) => (
+              <button
+                key={key}
+                className={`tab-button ${groupBy === key ? "active" : ""}`}
+                onClick={() => setGroupBy(key)}
+              >
+                {GROUP_LABELS[key]}
+              </button>
+            )
+          )}
         </div>
       </div>
 
@@ -114,22 +181,20 @@ export default function SessionGroups({
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              <th className="alert-table-th">{GROUP_LABELS[groupBy]}</th>
-              <th className="alert-table-th" style={{ width: 80 }}>
-                Total
-              </th>
-              <th className="alert-table-th" style={{ width: 80 }}>
-                Active
-              </th>
-              <th className="alert-table-th" style={{ width: 80 }}>
-                Idle
-              </th>
-              <th className="alert-table-th" style={{ width: 100 }}>
-                Idle in Txn
-              </th>
-              <th className="alert-table-th" style={{ width: 140 }}>
-                % of Max
-              </th>
+              <SortHeader label={GROUP_LABELS[groupBy]} k="name" />
+              <SortHeader label="Total" k="total" style={{ width: 90 }} />
+              <SortHeader label="Active" k="active" style={{ width: 90 }} />
+              <SortHeader label="Idle" k="idle" style={{ width: 90 }} />
+              <SortHeader
+                label="Idle in Txn"
+                k="idleInTxn"
+                style={{ width: 110 }}
+              />
+              <SortHeader
+                label="% of Max"
+                k="percent"
+                style={{ width: 140 }}
+              />
             </tr>
           </thead>
           <tbody>

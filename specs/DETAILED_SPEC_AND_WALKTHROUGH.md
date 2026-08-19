@@ -1,7 +1,7 @@
 # PG Vitals — Detailed Technical Specification & Codebase Walkthrough
 
-> **Version:** 0.4.0 | **Last Updated:** 2026-08-05
-> **Status:** All 10 product phases implemented (backend + frontend). 5 missing features added (alert feedback, HypoPG simulation, schema markers, webhook notifiers, onboarding wizard). Test suite added (80 tests). Auth (Clerk) and Billing (Stripe) require external accounts.
+> **Version:** 0.5.0 | **Last Updated:** 2026-08-19  
+> **Status:** All product phases 1–11 implemented. Includes Phase 11 Spec 5 features: P95/P99 latency percentiles, I/O timing diagnostics (`track_io_timing`), autovacuum starvation sentinel, and remote session remediation / Slack ChatOps. Test suite contains 105 tests across 12 test suites.
 
 ---
 
@@ -496,7 +496,7 @@ collectSchemaDiff() — DDL change detection for all active databases
 
 **File:** `src/collector/rules-engine.ts`
 
-5 heuristic rules evaluated per snapshot:
+6 heuristic rules evaluated per snapshot:
 
 | # | Rule | Severity | Threshold | What It Detects |
 |---|------|----------|-----------|-----------------|
@@ -505,6 +505,7 @@ collectSchemaDiff() — DDL change detection for all active databases
 | 3 | `blocking_chain_long` | critical | >30s | Lock chains where blocked session waits >30s |
 | 4 | `connection_exhaustion` | critical | >80% of max_connections | Approaching connection limit; checks for pooler |
 | 5 | `connection_spike` | warning | >50% increase from previous snapshot (min 10 conns) | Sudden jump in connection count |
+| 6 | `micro_query_lock_storm` | critical / warning | ≥3 concurrent write/lock sessions or >15 calls/sec consuming >20% CPU | High-frequency micro-queries clashing on row/table locks and saturating CPU |
 
 Each rule generates `GeneratedHint` objects that are:
 - Inserted into `root_cause_hints` table
@@ -603,6 +604,34 @@ Generates unique strings per alert type:
 | `high_cache_miss` | Read blocks > hit blocks |
 | `sort_disk_spill` | Sort method contains "external" |
 
+### 6.8b SQL-Aware Index & Query Advisor
+
+**Files:** `src/collector/sql-advisor.ts`, `apps/web/src/app/lib/sqlAdvisor.ts`
+
+Parses SQL statements from `pg_stat_statements` and query suggestions to generate tailored, non-blocking index recommendations and quantify execution savings both server-side (collector) and client-side (web):
+
+1. **Predicate Extraction**: Extracts equality WHERE columns, range/IN filters, and partial conditions (e.g. `IS NOT NULL`, `IS NULL`).
+2. **Projection Extraction**: Extracts selected columns to recommend covering indexes via `INCLUDE (...)` for Index-Only Scans with zero heap fetches.
+3. **DDL Generation**: Produces safe `CREATE INDEX CONCURRENTLY idx_{table}_{cols}_opt ON "{table}" (...) INCLUDE (...) WHERE ...;`.
+4. **Quantified Savings**: Calculates cumulative database execution time in hours (`calls * meanTimeMs`) and estimated savings percentage based on target index lookup latency (~0.05ms).
+5. **Frontend Integration**: Provides one-click `📋 Copy DDL`, `🧪 Test in HypoPG`, and `🗂️ View in Index Advisor` actions on suggestion cards and the Statement Inspector drawer.
+
+### 6.8c Query Suggestions Engine & Statement-Aware Optimizer
+
+**File:** `src/collector/query-suggestions.ts`
+
+Analyzes historical query statistics to generate actionable, statement-aware architectural optimization advice:
+
+| Rule & Pattern | Detection Logic | Statement-Specific Tailored Advice |
+| :--- | :--- | :--- |
+| **Micro-Query Lock / CPU Storm** | Velocity $\ge 15$/sec or calls $> 1500$, mean time $< 150$ms, $\ge 20\%$ total DB time | Distinguishes read vs. write/lock contention. Suggests connection throttling, partial indexes, or bulk updates. |
+| **High-Frequency Writes (`INSERT`)** | `INSERT INTO ...`, calls $> 500$, mean time $< 15$ms | Recommends **multi-row `VALUES (...), (...)` batching**, bulk loading with **`COPY`**, or grouping rows in transaction blocks to eliminate network roundtrips and WAL commit overhead. |
+| **High-Frequency Updates (`UPDATE`)** | `UPDATE ...`, calls $> 500$, mean time $< 15$ms | Recommends batch updates via `UPDATE ... FROM (VALUES (...))` or `WHERE id = ANY(...)`. |
+| **High-Frequency Deletes (`DELETE`)** | `DELETE FROM ...`, calls $> 500$, mean time $< 15$ms | Recommends chunked deletions and `WHERE id = ANY(...)` array filtering. |
+| **N+1 Read Point-Lookups (`SELECT`)** | `SELECT ...`, calls $> 500$, mean time $< 15$ms | Suggests application-level batching with `WHERE id = ANY(...)` / `IN (...)`, `JOIN`s, or generates covering index DDL. |
+| **Cache Miss / Disk Read Ratio** | $> 100$ blocks and `shared_blks_read > shared_blks_hit` | Recommends dedicated index creation or tuning `shared_buffers`. |
+| **Disk Temp Spill** | `temp_blks_written > 0` | Recommends tuning `work_mem` or creating sorted/composite indexes. |
+
 ### 6.9 Index Advisor
 
 **File:** `src/collector/index-advisor.ts`
@@ -681,11 +710,11 @@ Collects two types of data:
 - Silently skips databases with no replicas (zero overhead)
 - Inserts into `replication_snapshots` table
 
-### 6.13 Log Insights Collector
+### 6.13 Log Insights Collector & Event Diagnostics Inspector
 
-**File:** `src/collector/log-insights-collector.ts`
+**Files:** `src/collector/log-insights-collector.ts`, `apps/web/src/app/databases/[id]/logs/page.tsx`
 
-Collects error/warning signals from PostgreSQL system views (no log file access needed):
+Collects error/warning signals from PostgreSQL system views and provides an interactive root cause diagnostics drawer:
 
 | Source | What It Detects |
 |--------|----------------|
@@ -694,24 +723,34 @@ Collects error/warning signals from PostgreSQL system views (no log file access 
 | `pg_stat_activity` | Aborted transactions (`idle in transaction (aborted)` state) |
 | `pg_stat_activity` | Lock contention (sessions waiting on locks) |
 
+**Event Diagnostics Inspector:**
+- **Deadlock Analysis**: Explains circular lock dependencies, links to concurrent write queries (`?filter=dml`), and displays PostgreSQL engine logging parameters (`log_lock_waits = on`, `deadlock_timeout = '1s'`).
+- **High Rollback Rate**: Details transaction constraint failures and lock timeouts.
+- **Checkpoint Pressure**: Surfaces WAL sizing recommendations (`max_wal_size`, `checkpoint_completion_target`).
+- **Health Tab Integration**: Active Deadlock Alert Banner and clickable `🔒 Deadlocks` metric card linking to `/databases/[id]/logs?filter=deadlock`.
+
 Delta computation:
 - Stores cumulative counters in `db_error_stats`
 - Computes deltas between collection runs
 - Handles counter resets (PostgreSQL restart)
 - Only generates `log_insights` entries for significant changes
 
-### 6.14 Plan Regression Collector
+### 6.14 Multi-Factor Plan Regression Engine
 
 **File:** `src/collector/plan-regression-collector.ts`
 
-Detects query execution plan changes that may indicate performance regressions:
+Detects structural execution plan changes, cost spikes, and degraded access paths:
 
-1. Runs `EXPLAIN (FORMAT JSON)` (not ANALYZE) for top 20 queries by total time
-2. Extracts plan node types in DFS order and hashes the shape string (SHA-256, 16-char prefix)
-3. Stores plan snapshot in `query_plan_snapshots` hypertable
-4. Compares against previous snapshot for same queryid — if hash differs, generates a regression hint
-5. Root-cause hints distinguish: Index→SeqScan degradation, HashJoin↔NestedLoop flip, general shape change
-6. Detects plan flags: `seq_scan_large_table`, `nested_loop_high_rows`
+1. **Snapshots**: Automatically captures `EXPLAIN (FORMAT JSON)` for top queries by total execution time.
+2. **Multi-Factor Regression Scoring (`analyzePlanRegression`)**:
+   - **Cost Surge**: Flags planner cost spikes $\ge 30\%$ as `warning` and $\ge 100\%$ as `critical`.
+   - **Index Degradation**: Flags transitions from `Index Scan` / `Index Only Scan` to `Seq Scan`, surfacing the unindexed table name and row estimate.
+   - **Join Degradation**: Flags transitions from `Hash Join` or `Merge Join` to `Nested Loop` with high row counts.
+   - **Structural Shifts**: Hashes tree node paths (DFS order) to detect altered plan shapes.
+3. **Actionable Remediation**: Generates plain-English root causes and one-click copyable SQL fix commands (e.g. `ANALYZE <table_name>;` to refresh stale planner statistics).
+4. **Plan Flag Detection**: Captures `seq_scan_large_table` (>10,000 rows), `unindexed_filter`, and `nested_loop_high_rows`.
+5. **Interactive Diffing (`PlanDiffVisualizer.tsx`)**: Side-by-side visual comparison between baseline and regressed execution plans with delta metrics ($\Delta$ cost %, $\Delta$ rows).
+6. **On-Demand Capture**: Immediate `⚡ Capture Plan Now` action to execute live `EXPLAIN` and refresh snapshot history.
 
 ### 6.15 PgBouncer Collector
 
@@ -785,14 +824,14 @@ Detects DDL changes (CREATE/DROP table/column/index) via periodic schema diffing
 |-------|------|-------------|
 | `/` | `page.tsx` | Dashboard home — grid of monitored databases with connection gauges |
 | `/databases/new` | `databases/new/page.tsx` | Form to register a new database (name, connection string, environment) |
-| `/databases/[id]` | `databases/[id]/page.tsx` | Database detail — overview stats, connection chart (with schema change markers), sessions table, hints |
+| `/databases/[id]` | `databases/[id]/page.tsx` | Database detail — overview stats, feature subnav, root blocker alert banner, auto-refresh controller, point-in-time session replay ("Time-Travel") mode with Prev/Next step scrubber, connection chart with click-to-replay & timeframe toggles (15m, 1h, 6h, 24h, 7d, ALL), searchable sessions table with state filters |
 | `/databases/[id]/alerts` | `databases/[id]/alerts/page.tsx` | Alert rules + history + feedback (thumbs up/down) + multi-channel config (Slack, Email, PagerDuty, Teams, Webhook) |
-| `/databases/[id]/queries` | `databases/[id]/queries/page.tsx` | Query performance — sortable table + EXPLAIN capture |
-| `/databases/[id]/indexes` | `databases/[id]/indexes/page.tsx` | Index recommendations — unused + missing, dismiss/restore, HypoPG simulation |
-| `/databases/[id]/health` | `databases/[id]/health/page.tsx` | Vacuum stats + database health metrics |
+| `/databases/[id]/queries` | `databases/[id]/queries/page.tsx` | Query performance — workload KPI strip, search & filter chips, sortable table with inline workload heat bars, statement detail drawer with SQL syntax formatting, copy button, dual-metric latency/volume trend charts, on-demand EXPLAIN & HypoPG simulation bridge |
+| `/databases/[id]/indexes` | `databases/[id]/indexes/page.tsx` | Index advisor — default table view (toggleable to cards), reclaimable disk space & seq scan summary, search, sort, filter chips, CONCURRENTLY safe DDL, expandable indexdef, HypoPG simulation |
+| `/databases/[id]/health` | `databases/[id]/health/page.tsx` | Health score banner (0-100) + 4-tab layout (Overview/VACUUM & Bloat/Storage/Replication) with search, sort, filter, expandable rows, copy-to-clipboard VACUUM commands, disk growth sparklines |
 | `/databases/[id]/logs` | `databases/[id]/logs/page.tsx` | Log insights — errors, deadlocks, rollbacks |
 | `/databases/[id]/costs` | `databases/[id]/costs/page.tsx` | Query cost estimator — monthly IO+CPU cost per query |
-| `/databases/[id]/plans` | `databases/[id]/plans/page.tsx` | Plan regression timeline — shape hash diff + warning markers |
+| `/databases/[id]/plans` | `databases/[id]/plans/page.tsx` | Plan regression timeline — multi-factor regression scoring, side-by-side diffing (`PlanDiffVisualizer`), SVG map tree (`PlanTreeVisualizer`), flat list (`PlanListView`), cost evolution chart, on-demand capture |
 | `/databases/[id]/pooler` | `databases/[id]/pooler/page.tsx` | PgBouncer pool stats — active/waiting clients, pool utilization |
 | `/databases/[id]/schema` | `databases/[id]/schema/page.tsx` | Schema change event log — DDL events with diffs |
 | `/onboarding` | `onboarding/page.tsx` | 7-step onboarding wizard (connection validation, capability detection, setup SQL, Slack config) |
@@ -808,6 +847,9 @@ Detects DDL changes (CREATE/DROP table/column/index) via periodic schema diffing
 | `ConnectionChart` | Recharts time-series area chart for connection counts + schema change markers (ReferenceLine) |
 | `SessionsTable` | Sortable, filterable table of active PostgreSQL sessions |
 | `SessionGroups` | Sessions grouped by application_name, usename, or state |
+| `PlanDiffVisualizer` | Dual-column side-by-side execution plan diff view with node difference highlights and delta metrics |
+| `PlanTreeVisualizer` | SVG hierarchical execution plan tree map with interactive pan/zoom and collapsible nodes |
+| `PlanListView` | Indented flat tabular breakdown of EXPLAIN execution nodes |
 | `HintCard` | Root-cause hint card with severity indicator |
 | `StatsCard` | Metric display card (value + label) |
 | `StatusBadge` | Environment badge (production/staging/development) |
@@ -867,7 +909,7 @@ Type-safe fetch wrapper with:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/databases/:id/overview` | Latest snapshot + utilization % |
-| `GET` | `/api/databases/:id/sessions` | Latest session details |
+| `GET` | `/api/databases/:id/sessions` | Latest or historical session details (`?timestamp=` or `?snapshotId=`) |
 | `GET` | `/api/databases/:id/snapshots` | Time-series snapshots (`?from=&to=&limit=`) |
 | `GET` | `/api/databases/:id/hints` | Active root-cause hints (last 24h) |
 
@@ -891,6 +933,8 @@ Type-safe fetch wrapper with:
 | `GET` | `/api/databases/:id/query-stats/status` | Check pg_stat_statements availability |
 | `GET` | `/api/databases/:id/queries` | List top queries (`?sort=total_time\|calls\|mean_time\|rows`) |
 | `GET` | `/api/databases/:id/queries/:queryid` | Query detail + 24h time series |
+| `GET` | `/api/databases/:id/queries/percentiles` | Tail latency percentiles ($P_{50}, P_{95}, P_{99}$) and variance ratio |
+| `GET` | `/api/databases/:id/io-diagnostics` | Storage I/O wait times and `track_io_timing` status |
 | `POST` | `/api/databases/:id/queries/:queryid/explain` | Trigger EXPLAIN capture |
 | `GET` | `/api/databases/:id/queries/:queryid/explains` | List past EXPLAIN captures |
 | `GET` | `/api/databases/:id/queries/cost-estimates` | Estimated monthly cost per query (§2.11) |
@@ -914,6 +958,7 @@ Type-safe fetch wrapper with:
 | `GET` | `/api/databases/:id/health` | Current + 24h health history |
 | `GET` | `/api/databases/:id/table-cache-hit` | Per-table cache hit ratios |
 | `GET` | `/api/databases/:id/disk-growth` | Table size history + growth forecast |
+| `GET` | `/api/databases/:id/autovacuum/starvation` | Worker pool saturation & starved tables sentinel |
 
 ### Replication
 
@@ -941,6 +986,13 @@ Type-safe fetch wrapper with:
 |--------|----------|-------------|
 | `GET` | `/api/databases/:id/pooler` | Latest PgBouncer pool snapshot (§2.12) |
 | `GET` | `/api/databases/:id/pooler/history` | Pool metrics 24h time series (§2.12) |
+
+### Remote Remediation & ChatOps
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/databases/:id/sessions/:pid/terminate` | Terminate rogue backend session (`pg_terminate_backend`) (Admin+) |
+| `POST` | `/api/webhooks/slack/interactions` | Slack interactive button webhook handler for session termination |
 
 ### Organization & Team
 
@@ -1182,14 +1234,18 @@ pnpm dev                          # Start collector (3001) + web (3000)
 | 9 | PgBouncer Awareness | ✅ Pool metrics + pool exhaustion alerting | ✅ Pooler page with pool utilization dashboard | **Complete** |
 | 9 | Onboarding Wizard | ✅ Validate + capabilities endpoints | ✅ 7-step guided setup at /onboarding | **Complete** |
 | 10 | Cost-Per-Query Estimator | ✅ IO + CPU cost model with RDS defaults | ✅ Cost dashboard page | **Complete** |
+| 11 | P95/P99 Percentiles & Tail Latency | ✅ Continuous log-normal estimation algorithm | ✅ API endpoint + serializers | **Complete** |
+| 11 | Storage I/O Diagnostics (`track_io_timing`) | ✅ `pg_settings` check + stall heuristics | ✅ Diagnostics API + suggestion rules | **Complete** |
+| 11 | Autovacuum Starvation Sentinel | ✅ Worker pool saturation + starved candidate queries | ✅ Starvation API + event tracking | **Complete** |
+| 11 | Remote Session Termination & ChatOps | ✅ `pg_terminate_backend` API + Slack webhook HMAC | ✅ Interactive Slack Block Kit alerts | **Complete** |
 | — | Data Retention | ✅ Tier-based (Free=1d, Pro=30d, Team=90d) | — | **Complete** |
 | — | Email Alerting | ✅ Nodemailer SMTP + HTML templates | ✅ SMTP config form + test button | **Complete** |
 | — | Query Text Redaction | ✅ Literal stripping before storage | — | **Complete** |
 | — | Plan-based Feature Gating | ✅ Pro/Team tier enforcement | — | **Complete** |
-| — | Test Suite | ✅ Vitest (80 tests, 5 suites) | — | **Complete** |
+| — | Test Suite | ✅ Vitest (105 tests, 12 suites) | — | **Complete** |
 
 > [!IMPORTANT]
-> **All phases 1–10 are fully implemented (backend + frontend).** Phase 3 auth (Clerk) and billing (Stripe) require external service accounts to activate. All other features from the product spec are complete.
+> **All phases 1–11 are fully implemented (backend + frontend/APIs).** Phase 3 auth (Clerk) and billing (Stripe) require external service credentials to connect in live production environments. All other features across all specifications are complete.
 
 ---
 

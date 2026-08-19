@@ -220,6 +220,18 @@ pnpm db:seed
 
 ---
 
+### Module 13: Spec 5 Extended Features (Phase 11)
+
+| ID | Test Case | Steps | Expected Result | Status | Notes |
+|----|-----------|-------|----------------|--------|-------|
+| TC-124 | Query Percentiles Tracking | 1. Query `/api/databases/:id/queries/percentiles` | Returns P50, P95, P99, and variance ratio per query | ⬜ | Spec §3 |
+| TC-125 | Storage I/O Diagnostics | 1. Query `/api/databases/:id/io-diagnostics` | Returns `track_io_timing` status and queries with disk stall warnings | ⬜ | Spec §4 |
+| TC-126 | Autovacuum Starvation Sentinel | 1. Query `/api/databases/:id/autovacuum/starvation` | Returns worker saturation status and starved table dead tuple metrics | ⬜ | Spec §5 |
+| TC-127 | Remote Session Termination API | 1. POST `/api/databases/:id/sessions/:pid/terminate` with Admin role | Executes `pg_terminate_backend` and returns termination confirmation | ⬜ | Spec §6.2 |
+| TC-128 | Interactive Slack ChatOps Webhook | 1. POST `/api/webhooks/slack/interactions` with valid HMAC and session kill payload | Validates HMAC signature and terminates backend PID with card update | ⬜ | Spec §6.1 |
+
+---
+
 ## 3. UAT Sign-Off
 
 ### Summary
@@ -238,7 +250,8 @@ pnpm db:seed
 | Team Management | 5 | | | | |
 | UI / UX | 10 | | | | |
 | Retention & Security | 4 | | | | |
-| **TOTAL** | **75** | | | | |
+| Spec 5 Extended Features (Phase 11) | 5 | | | | |
+| **TOTAL** | **80** | | | | |
 
 ### Approval
 

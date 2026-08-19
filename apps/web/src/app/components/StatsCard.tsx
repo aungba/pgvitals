@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 
 /* ===================================================================
    StatsCard — Compact stat display with label, value, optional trend
@@ -12,6 +13,7 @@ interface StatsCardProps {
   icon: string;
   color?: string;
   subtitle?: string;
+  href?: string;
 }
 
 export default function StatsCard({
@@ -20,8 +22,9 @@ export default function StatsCard({
   icon,
   color = "var(--brand)",
   subtitle,
+  href,
 }: StatsCardProps) {
-  return (
+  const card = (
     <div
       className="glass-card"
       style={{
@@ -30,6 +33,7 @@ export default function StatsCard({
         alignItems: "center",
         gap: "var(--space-md)",
         transition: "all var(--transition-base)",
+        cursor: href ? "pointer" : "default",
       }}
     >
       <div
@@ -85,4 +89,14 @@ export default function StatsCard({
       </div>
     </div>
   );
+
+  if (href) {
+    return (
+      <Link href={href} style={{ textDecoration: "none", color: "inherit", display: "block" }}>
+        {card}
+      </Link>
+    );
+  }
+
+  return card;
 }

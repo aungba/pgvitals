@@ -1,21 +1,22 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getDatabase, getPoolerStats, getPoolerHistory } from "../../../lib/api";
 import type { Database, PoolerSnapshot } from "../../../lib/api";
 
 /* ===================================================================
-   PgBouncer Pool Dashboard — Phase 9
-   Real-time pool metrics and 24h history
+   PgBouncer Pool Stats Page — Phase 9
    =================================================================== */
 
-function formatMs(val: number | null): string {
-  if (val === null || val === undefined) return "—";
-  if (val < 1) return `${(val * 1000).toFixed(0)}µs`;
-  if (val < 1000) return `${val.toFixed(1)}ms`;
-  return `${(val / 1000).toFixed(2)}s`;
+type PoolSortKey = "poolName" | "clActive" | "clWaiting" | "svActive" | "svIdle" | "avgWaitTimeMs";
+
+function formatMs(ms: number | null): string {
+  if (ms === null || isNaN(ms)) return "—";
+  if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`;
+  if (ms < 1000) return `${ms.toFixed(1)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
 }
 
 export default function PoolerPage() {
@@ -28,19 +29,22 @@ export default function PoolerPage() {
   const [loading, setLoading] = useState(true);
   const [noPgBouncer, setNoPgBouncer] = useState(false);
 
+  const [poolSortKey, setPoolSortKey] = useState<PoolSortKey>("clWaiting");
+  const [poolSortDir, setPoolSortDir] = useState<"asc" | "desc">("desc");
+
   const fetchData = useCallback(async () => {
     try {
       const [db, poolData, histData] = await Promise.all([
         getDatabase(id),
         getPoolerStats(id),
-        getPoolerHistory(id),
+        getPoolerHistory(id).catch(() => ({ history: [] })),
       ]);
       setDatabase(db);
       setPools(poolData.pools);
       setHistory(histData.history);
-      if (poolData.pools.length === 0) setNoPgBouncer(true);
+      setNoPgBouncer(poolData.pools.length === 0 && histData.history.length === 0);
     } catch {
-      // ignore
+      setNoPgBouncer(true);
     } finally {
       setLoading(false);
     }
@@ -53,23 +57,78 @@ export default function PoolerPage() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  // Aggregate totals
   const totalClActive = pools.reduce((s, p) => s + p.clActive, 0);
   const totalClWaiting = pools.reduce((s, p) => s + p.clWaiting, 0);
   const totalSvActive = pools.reduce((s, p) => s + p.svActive, 0);
   const totalSvIdle = pools.reduce((s, p) => s + p.svIdle, 0);
 
-  // Build simple sparkline from history
-  const sparklineData = history.reduce<{ time: string; clActive: number; clWaiting: number }[]>((acc, h) => {
-    const key = new Date(h.capturedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-    const existing = acc.find((x) => x.time === key);
-    if (existing) {
-      existing.clActive += h.clActive;
-      existing.clWaiting += h.clWaiting;
+  const sortedPools = useMemo(() => {
+    return [...pools].sort((a, b) => {
+      const dir = poolSortDir === "asc" ? 1 : -1;
+      switch (poolSortKey) {
+        case "poolName":
+          return dir * a.poolName.localeCompare(b.poolName);
+        case "clActive":
+          return dir * (a.clActive - b.clActive);
+        case "clWaiting":
+          return dir * (a.clWaiting - b.clWaiting);
+        case "svActive":
+          return dir * (a.svActive - b.svActive);
+        case "svIdle":
+          return dir * (a.svIdle - b.svIdle);
+        case "avgWaitTimeMs":
+        default:
+          return dir * ((a.avgWaitTimeMs ?? 0) - (b.avgWaitTimeMs ?? 0));
+      }
+    });
+  }, [pools, poolSortKey, poolSortDir]);
+
+  function handlePoolSort(key: PoolSortKey) {
+    if (poolSortKey === key) {
+      setPoolSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
-      acc.push({ time: key, clActive: h.clActive, clWaiting: h.clWaiting });
+      setPoolSortKey(key);
+      setPoolSortDir("desc");
     }
-    return acc;
-  }, []);
+  }
+
+  function PoolSortHeader({
+    label,
+    k,
+    align = "left",
+    style,
+  }: {
+    label: string;
+    k: PoolSortKey;
+    align?: "left" | "right";
+    style?: React.CSSProperties;
+  }) {
+    const isActive = poolSortKey === k;
+    return (
+      <th
+        onClick={() => handlePoolSort(k)}
+        style={{
+          padding: "var(--space-md) var(--space-lg)",
+          color: "var(--text-muted)",
+          fontWeight: 600,
+          fontSize: "0.75rem",
+          textTransform: "uppercase",
+          textAlign: align,
+          cursor: "pointer",
+          userSelect: "none",
+          ...style,
+        }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, justifyContent: align === "right" ? "flex-end" : "flex-start", width: "100%" }}>
+          {label}
+          <span style={{ fontSize: "0.7rem", color: isActive ? "var(--brand)" : "var(--text-muted)", opacity: isActive ? 1 : 0.4 }}>
+            {isActive ? (poolSortDir === "asc" ? "▲" : "▼") : "↕"}
+          </span>
+        </span>
+      </th>
+    );
+  }
 
   if (loading) {
     return (
@@ -159,7 +218,7 @@ export default function PoolerPage() {
               <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>Servers Active</div>
             </div>
             <div className="glass-card-static" style={{ padding: "var(--space-lg)", textAlign: "center" }}>
-              <div style={{ fontSize: "2rem", fontWeight: 700, color: "var(--text-secondary)" }}>
+              <div style={{ fontSize: "2rem", fontWeight: 700, color: "var(--text-primary)" }}>
                 {totalSvIdle}
               </div>
               <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>Servers Idle</div>
@@ -168,23 +227,23 @@ export default function PoolerPage() {
 
           {/* Pool Details Table */}
           <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "var(--space-md)" }}>
-            Pool Details
+            Pool Details ({sortedPools.length})
           </h2>
           <div className="glass-card-static" style={{ padding: 0, overflow: "hidden", marginBottom: "var(--space-xl)" }}>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
                 <thead>
                   <tr style={{ borderBottom: "2px solid var(--border)", textAlign: "left" }}>
-                    <th style={{ padding: "var(--space-md) var(--space-lg)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase" }}>Pool</th>
-                    <th style={{ padding: "var(--space-md)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase", textAlign: "right" }}>CL Active</th>
-                    <th style={{ padding: "var(--space-md)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase", textAlign: "right" }}>CL Waiting</th>
-                    <th style={{ padding: "var(--space-md)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase", textAlign: "right" }}>SV Active</th>
-                    <th style={{ padding: "var(--space-md)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase", textAlign: "right" }}>SV Idle</th>
-                    <th style={{ padding: "var(--space-md) var(--space-lg)", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.75rem", textTransform: "uppercase", textAlign: "right" }}>Avg Wait</th>
+                    <PoolSortHeader label="Pool" k="poolName" />
+                    <PoolSortHeader label="CL Active" k="clActive" align="right" style={{ padding: "var(--space-md)", width: 110 }} />
+                    <PoolSortHeader label="CL Waiting" k="clWaiting" align="right" style={{ padding: "var(--space-md)", width: 120 }} />
+                    <PoolSortHeader label="SV Active" k="svActive" align="right" style={{ padding: "var(--space-md)", width: 110 }} />
+                    <PoolSortHeader label="SV Idle" k="svIdle" align="right" style={{ padding: "var(--space-md)", width: 100 }} />
+                    <PoolSortHeader label="Avg Wait" k="avgWaitTimeMs" align="right" style={{ width: 120 }} />
                   </tr>
                 </thead>
                 <tbody>
-                  {pools.map((p, i) => (
+                  {sortedPools.map((p, i) => (
                     <tr key={`${p.poolName}-${i}`} style={{
                       borderBottom: "1px solid var(--border)",
                       background: i % 2 === 0 ? "transparent" : "var(--surface-alt)",
@@ -213,46 +272,6 @@ export default function PoolerPage() {
               </table>
             </div>
           </div>
-
-          {/* Simple History Chart */}
-          {sparklineData.length > 1 && (
-            <>
-              <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "var(--space-md)" }}>
-                24h Connection History
-              </h2>
-              <div className="glass-card-static" style={{ padding: "var(--space-lg)" }}>
-                <svg viewBox={`0 0 ${sparklineData.length * 12} 100`} style={{ width: "100%", height: 120 }}>
-                  {(() => {
-                    const maxVal = Math.max(...sparklineData.map((d) => d.clActive + d.clWaiting), 1);
-                    return sparklineData.map((d, i) => {
-                      const x = i * 12 + 2;
-                      const barWidth = 8;
-                      const activeH = (d.clActive / maxVal) * 80;
-                      const waitH = (d.clWaiting / maxVal) * 80;
-                      return (
-                        <g key={i}>
-                          <rect
-                            x={x} y={90 - activeH - waitH}
-                            width={barWidth} height={waitH}
-                            fill="var(--signal-critical)" rx={1} opacity={0.8}
-                          />
-                          <rect
-                            x={x} y={90 - activeH}
-                            width={barWidth} height={activeH}
-                            fill="var(--signal-healthy)" rx={1} opacity={0.7}
-                          />
-                        </g>
-                      );
-                    });
-                  })()}
-                </svg>
-                <div style={{ display: "flex", justifyContent: "center", gap: "var(--space-lg)", marginTop: "var(--space-sm)", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                  <span><span style={{ display: "inline-block", width: 10, height: 10, background: "var(--signal-healthy)", borderRadius: 2, marginRight: 4 }} />Active</span>
-                  <span><span style={{ display: "inline-block", width: 10, height: 10, background: "var(--signal-critical)", borderRadius: 2, marginRight: 4 }} />Waiting</span>
-                </div>
-              </div>
-            </>
-          )}
         </>
       )}
     </div>

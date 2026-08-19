@@ -19,7 +19,11 @@ interface PlanNode {
   "Total Cost"?: number;
   "Plan Rows"?: number;
   "Relation Name"?: string;
+  "Alias"?: string;
+  "Filter"?: string;
+  "Index Name"?: string;
   Plans?: PlanNode[];
+  [key: string]: unknown;
 }
 
 /**
@@ -46,20 +50,24 @@ function hashPlanShape(nodeTypes: string[]): string {
 /**
  * Detects plan flags (concerning patterns) in the plan.
  */
-function detectPlanFlags(node: PlanNode, flags: Record<string, unknown> = {}): Record<string, unknown> {
-  const nodeType = node["Node Type"];
+export function detectPlanFlags(node: PlanNode, flags: Record<string, unknown> = {}): Record<string, unknown> {
+  const nodeType = node["Node Type"] ?? "";
   const planRows = node["Plan Rows"] ?? 0;
-  const relationName = node["Relation Name"];
+  const relationName = node["Relation Name"] ?? node["Alias"];
 
-  if (nodeType === "Seq Scan" && planRows > 10000) {
+  if (nodeType.includes("Seq Scan") && planRows > 5000) {
     flags["seq_scan_large_table"] = true;
-    flags["seq_scan_table"] = relationName;
+    if (relationName) flags["seq_scan_table"] = relationName;
     flags["seq_scan_rows"] = planRows;
   }
 
-  if (nodeType === "Nested Loop" && planRows > 10000) {
+  if (nodeType.includes("Nested Loop") && planRows > 5000) {
     flags["nested_loop_high_rows"] = true;
     flags["nested_loop_rows"] = planRows;
+  }
+
+  if (node["Filter"] && nodeType.includes("Seq Scan")) {
+    flags["unindexed_filter"] = true;
   }
 
   if (node.Plans) {
@@ -71,30 +79,114 @@ function detectPlanFlags(node: PlanNode, flags: Record<string, unknown> = {}): R
   return flags;
 }
 
+export interface PlanRegressionAnalysis {
+  isRegression: boolean;
+  severity: "info" | "warning" | "critical";
+  summary: string;
+  reason: string;
+  remediationSql?: string;
+  costDeltaPct?: number;
+  oldCost?: number;
+  newCost?: number;
+}
+
+/**
+ * Multi-factor plan regression analyzer.
+ * Evaluates shape changes, cost surges (>= 30%), index dropoffs, and join degradation.
+ */
+export function analyzePlanRegression(
+  oldPlan: {
+    topNodeType?: string | null;
+    planShapeHash?: string | null;
+    estimatedCost?: number | null;
+    planFlags?: Record<string, unknown> | null;
+  },
+  newPlan: {
+    topNodeType?: string | null;
+    planShapeHash?: string | null;
+    estimatedCost?: number | null;
+    planFlags?: Record<string, unknown> | null;
+  }
+): PlanRegressionAnalysis | null {
+  const oldCost = oldPlan.estimatedCost ?? 0;
+  const newCost = newPlan.estimatedCost ?? 0;
+  const oldTop = oldPlan.topNodeType ?? "Unknown";
+  const newTop = newPlan.topNodeType ?? "Unknown";
+  const shapeChanged = oldPlan.planShapeHash !== newPlan.planShapeHash;
+
+  const costDeltaPct = oldCost > 0 ? ((newCost - oldCost) / oldCost) * 100 : 0;
+
+  // 1. Critical degradation: Index Scan -> Seq Scan
+  if (oldTop.includes("Index") && newTop.includes("Seq Scan")) {
+    const table = (newPlan.planFlags?.seq_scan_table as string) || "the involved table";
+    return {
+      isRegression: true,
+      severity: "critical",
+      summary: `Index scan dropped → ${newTop}`,
+      reason: `Query execution plan degraded from indexed scan (${oldTop}) to sequential scan (${newTop}). This can cause high disk I/O and query latency.`,
+      remediationSql: `ANALYZE ${table};`,
+      costDeltaPct,
+      oldCost,
+      newCost,
+    };
+  }
+
+  // 2. Hash Join -> Nested Loop on high row count
+  if (oldTop.includes("Hash Join") && newTop.includes("Nested Loop") && (newPlan.planFlags?.nested_loop_high_rows || costDeltaPct > 20)) {
+    return {
+      isRegression: true,
+      severity: "warning",
+      summary: `Hash Join → Nested Loop (high rows)`,
+      reason: `Query switched from Hash Join to Nested Loop with large estimated rows, risking polynomial execution time.`,
+      remediationSql: `ANALYZE;`,
+      costDeltaPct,
+      oldCost,
+      newCost,
+    };
+  }
+
+  // 3. Significant cost spike (>= 30% increase)
+  if (costDeltaPct >= 30) {
+    const isSevere = costDeltaPct >= 100;
+    return {
+      isRegression: true,
+      severity: isSevere ? "critical" : "warning",
+      summary: `Plan cost increased by +${costDeltaPct.toFixed(0)}%`,
+      reason: `Planner estimated cost surged from ${oldCost.toFixed(1)} to ${newCost.toFixed(1)} (+${costDeltaPct.toFixed(0)}%).`,
+      remediationSql: `ANALYZE;`,
+      costDeltaPct,
+      oldCost,
+      newCost,
+    };
+  }
+
+  // 4. Shape changed
+  if (shapeChanged) {
+    return {
+      isRegression: true,
+      severity: "info",
+      summary: `Plan shape changed (${oldTop} → ${newTop})`,
+      reason: `Plan execution tree structure shifted from ${oldTop} to ${newTop}.`,
+      remediationSql: `ANALYZE;`,
+      costDeltaPct,
+      oldCost,
+      newCost,
+    };
+  }
+
+  return null;
+}
+
 /**
  * Generates a root-cause hint for a plan regression.
  */
 function buildRegressionHint(
   queryid: number,
+  analysis: PlanRegressionAnalysis,
   oldTopNode: string,
-  newTopNode: string,
-  oldHash: string,
-  newHash: string
+  newTopNode: string
 ): string {
-  // Detect specific plan degradation patterns
-  if (oldTopNode.includes("Index") && newTopNode.includes("Seq Scan")) {
-    return `Query plan degraded from ${oldTopNode} to ${newTopNode}. Possible causes: stale statistics (run ANALYZE on involved tables), data growth crossing a planner cost threshold, or index corruption. Check that relevant indexes still exist.`;
-  }
-
-  if (oldTopNode.includes("Hash Join") && newTopNode.includes("Nested Loop")) {
-    return `Query switched from Hash Join to Nested Loop, likely due to changed row count estimates. Run ANALYZE on involved tables to refresh statistics.`;
-  }
-
-  if (oldTopNode.includes("Nested Loop") && newTopNode.includes("Hash Join")) {
-    return `Query switched from Nested Loop to Hash Join. This may indicate table growth — the planner now estimates more rows. Usually benign, but monitor query performance.`;
-  }
-
-  return `Query execution plan changed shape (${oldTopNode} → ${newTopNode}). Review table statistics (run ANALYZE) and check for recent schema changes.`;
+  return `${analysis.reason} Recommended: ${analysis.remediationSql ?? "Run ANALYZE on involved tables."}`;
 }
 
 /**
@@ -305,6 +397,8 @@ export async function collectPlanSnapshots(
         .select({
           planShapeHash: queryPlanSnapshots.planShapeHash,
           topNodeType: queryPlanSnapshots.topNodeType,
+          estimatedCost: queryPlanSnapshots.estimatedCost,
+          planFlags: queryPlanSnapshots.planFlags,
         })
         .from(queryPlanSnapshots)
         .where(
@@ -318,22 +412,41 @@ export async function collectPlanSnapshots(
 
       if (prevPlans.length >= 2) {
         const oldPlan = prevPlans[1]; // The previous snapshot
-        if (oldPlan.planShapeHash !== planShapeHash) {
+        const analysis = analyzePlanRegression(
+          {
+            ...oldPlan,
+            planFlags: oldPlan.planFlags as Record<string, unknown> | null,
+          },
+          {
+            planShapeHash,
+            topNodeType,
+            estimatedCost,
+            planFlags,
+          }
+        );
+
+        if (analysis?.isRegression) {
           const hintText = buildRegressionHint(
             query.queryid,
+            analysis,
             oldPlan.topNodeType ?? "unknown",
-            topNodeType ?? "unknown",
-            oldPlan.planShapeHash,
-            planShapeHash
+            topNodeType ?? "unknown"
           );
 
           hints.push({
             ruleType: "plan_regression",
-            severity: "warning",
-            title: `Plan regression detected for queryid ${query.queryid}`,
+            severity: analysis.severity,
+            title: `Plan regression detected for query #${query.queryid}: ${analysis.summary}`,
             description: hintText,
             metadata: {
               queryid: query.queryid,
+              summary: analysis.summary,
+              severity: analysis.severity,
+              reason: analysis.reason,
+              remediation_sql: analysis.remediationSql,
+              cost_delta_pct: analysis.costDeltaPct,
+              old_cost: analysis.oldCost,
+              new_cost: analysis.newCost,
               old_plan_shape: oldPlan.planShapeHash,
               new_plan_shape: planShapeHash,
               old_top_node: oldPlan.topNodeType,
@@ -343,7 +456,7 @@ export async function collectPlanSnapshots(
           });
 
           log.warn(
-            { monitoredDbId, queryid: query.queryid, oldHash: oldPlan.planShapeHash, newHash: planShapeHash },
+            { monitoredDbId, queryid: query.queryid, summary: analysis.summary, severity: analysis.severity },
             "Plan regression detected"
           );
         }

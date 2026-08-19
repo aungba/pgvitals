@@ -114,7 +114,9 @@ first_seen, last_seen
 **Optimizer suggestions (rules engine):**
 | Signal | Suggestion |
 |---|---|
-| High `calls`, low `mean_time`, tight repetition from one `application_name` | "This query runs {calls}x in the last hour from `{application_name}` — possible N+1 pattern. Consider batching with `IN (...)` or a JOIN." |
+| High `calls`, low `mean_time` on `SELECT` | "This query runs {calls}x with {mean_time}ms avg — possible N+1 read pattern. Consider batching with `WHERE id = ANY(...)` / `IN (...)` or a JOIN." |
+| High `calls`, low `mean_time` on `INSERT` | "This query runs {calls}x with {mean_time}ms avg. Single-row INSERTs incur high roundtrip and WAL commit overhead. Consider multi-row `VALUES (...), (...)`, bulk `COPY`, or wrapping in transactions." |
+| High `calls`, low `mean_time` on `UPDATE`/`DELETE` | "This query runs {calls}x with {mean_time}ms avg. Consider batching with `UPDATE ... FROM (VALUES (...))` or `WHERE id = ANY(...)`." |
 | High `shared_blks_read` vs. `shared_blks_hit` | "This query reads mostly from disk, not cache. Consider an index, or review `shared_buffers` sizing." |
 | `temp_blks_written` > 0 | "This query is spilling to disk for sorts/hashes. Consider raising `work_mem` or reducing result set size." |
 | Sequential scan on table >10k rows (via EXPLAIN) | "This query scans all of `{table}`. An index on `{columns}` may help." — links to Index Advisor |
@@ -225,19 +227,25 @@ growth_rate_bytes_per_day (7-day rolling average), projected_days_to_disk_limit
 
 ---
 
-### 2.10 Query Plan Regression Detection
+### 2.10 Query Plan Regression Detection & Diff Visualizer
 
-**Data source:** periodic `EXPLAIN` capture (not `EXPLAIN ANALYZE`, to keep overhead low) for top queries by total time
+**Data source:** periodic `EXPLAIN (FORMAT JSON)` capture for top queries by total time, plus on-demand `⚡ Capture Plan Now` execution
 
 **Metrics tracked:**
 ```
 query_fingerprint, captured_at, plan_shape_hash (normalized node types: seq scan / index scan / nested loop / hash join etc.),
-estimated_cost, actual_mean_time_ms (cross-referenced from pg_stat_statements)
+estimated_cost, top_node_type, plan_flags (seq_scan_large_table, nested_loop_high_rows, unindexed_filter)
 ```
 
-- Diff `plan_shape_hash` over time per query fingerprint; flag when a query flips from an index scan to a sequential scan (or similar plan degradation)
-- Common causes worth naming in the root-cause hint: stale table statistics (missing `ANALYZE`), data growth crossing a planner cost threshold, or a parameter-sensitive plan ("parameter sniffing")
-- This targets a genuinely hard-to-diagnose incident class — "nothing changed in our code, but the query got slow" — and few competitors surface it explicitly
+- **Multi-Factor Regression Engine**:
+  - Diffs cost spikes ($\ge 30\%$ warning, $\ge 100\%$ critical)
+  - Detects index drop-offs (`Index Scan` $\to$ `Seq Scan`)
+  - Detects join degradation (`Hash Join` $\to$ `Nested Loop` on high-row scans)
+  - Produces structured root-cause hints and copyable remediation DDL (`ANALYZE <table_name>;`)
+- **Side-by-Side Plan Diffing (`PlanDiffVisualizer`)**:
+  - Dual-column comparison: Baseline Plan vs. Current/Regressed Plan
+  - Color-coded node diffs (green index scans vs. red unindexed scans) and metric deltas ($\Delta$ cost %, $\Delta$ rows)
+  - Interactive SVG Plan Tree Map and flat list view
 
 ---
 

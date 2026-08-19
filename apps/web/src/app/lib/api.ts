@@ -206,18 +206,46 @@ export async function getOverview(id: string, token?: string): Promise<OverviewR
   return request<OverviewResponse>(`/api/databases/${id}/overview`, { token });
 }
 
-export async function getSessions(id: string, token?: string): Promise<Session[]> {
-  const data = await request<SessionsResponse>(`/api/databases/${id}/sessions`, { token });
-  return data.sessions;
+export interface SessionsResponse {
+  snapshotId?: string | null;
+  snapshotTimestamp?: string | null;
+  sessions: Session[];
+}
+
+export async function getSessions(
+  id: string,
+  timestampOrSnapshotId?: string,
+  token?: string,
+): Promise<{ snapshotId: string | null; snapshotTimestamp: string | null; sessions: Session[] }> {
+  let url = `/api/databases/${id}/sessions`;
+  if (timestampOrSnapshotId) {
+    if (timestampOrSnapshotId.includes("-") && timestampOrSnapshotId.length === 36 && !timestampOrSnapshotId.includes("T")) {
+      url += `?snapshotId=${encodeURIComponent(timestampOrSnapshotId)}`;
+    } else {
+      url += `?timestamp=${encodeURIComponent(timestampOrSnapshotId)}`;
+    }
+  }
+  const data = await request<SessionsResponse>(url, { token });
+  return {
+    snapshotId: data.snapshotId ?? null,
+    snapshotTimestamp: data.snapshotTimestamp ?? null,
+    sessions: data.sessions ?? [],
+  };
 }
 
 export async function getSnapshots(
   id: string,
-  limit = 100,
+  limit = 200,
+  from?: string,
+  to?: string,
   token?: string,
 ): Promise<Snapshot[]> {
+  const params = new URLSearchParams();
+  params.set("limit", limit.toString());
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
   const data = await request<SnapshotsResponse>(
-    `/api/databases/${id}/snapshots?limit=${limit}`,
+    `/api/databases/${id}/snapshots?${params.toString()}`,
     { token },
   );
   return data.snapshots;
@@ -760,12 +788,18 @@ export interface DbErrorStatEntry {
 export async function getLogInsights(
   dbId: string,
   hours?: number,
-  severity?: string,
+  filter?: string,
   token?: string,
 ): Promise<{ insights: LogInsight[] }> {
   const params = new URLSearchParams();
   if (hours) params.set("hours", hours.toString());
-  if (severity) params.set("severity", severity);
+  if (filter && filter !== "all") {
+    if (["error", "warning", "info", "critical"].includes(filter.toLowerCase())) {
+      params.set("severity", filter);
+    } else {
+      params.set("errorType", filter);
+    }
+  }
   const qs = params.toString();
   return request<{ insights: LogInsight[] }>(
     `/api/databases/${dbId}/log-insights${qs ? `?${qs}` : ""}`,
@@ -889,6 +923,17 @@ export async function getQueryCostEstimates(
 
 /* ---------- Plan Regression Detection (§2.10) ---------- */
 
+export interface PlanRegressionAnalysis {
+  isRegression: boolean;
+  severity: "info" | "warning" | "critical";
+  summary: string;
+  reason: string;
+  remediationSql?: string;
+  costDeltaPct?: number;
+  oldCost?: number;
+  newCost?: number;
+}
+
 export interface PlanSnapshot {
   id: string;
   queryid: number;
@@ -896,9 +941,10 @@ export interface PlanSnapshot {
   planShapeHash: string;
   estimatedCost: number | null;
   topNodeType: string | null;
-  planFlags: Record<string, boolean> | null;
-  planJson: object | null;
+  planFlags: Record<string, any> | null;
+  planJson: any;
   regression: string | null;
+  regressionAnalysis?: PlanRegressionAnalysis | null;
 }
 
 export async function getTrackedPlanQueryIds(

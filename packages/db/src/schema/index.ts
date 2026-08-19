@@ -36,6 +36,7 @@ export {
   tableBloatStats,
   dbHealthSnapshots,
   tableSizeHistory,
+  autovacuumStarvationEvents,
 } from "./vacuum-health.js";
 
 export {

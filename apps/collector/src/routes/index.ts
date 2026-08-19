@@ -11,6 +11,7 @@ import logInsightRoutes from "./log-insights.js";
 import orgRoutes from "./org.js";
 import schemaEventRoutes from "./schema-events.js";
 import poolerRoutes from "./pooler.js";
+import remediationRoutes from "./remediation.js";
 
 /**
  * Fastify plugin that registers all API route handlers.
@@ -28,4 +29,5 @@ export default async function routes(app: FastifyInstance): Promise<void> {
   await app.register(orgRoutes);
   await app.register(schemaEventRoutes);
   await app.register(poolerRoutes);
+  await app.register(remediationRoutes);
 }

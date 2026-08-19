@@ -55,6 +55,9 @@ export async function evaluateRules(
   );
   hints.push(...spikeHints);
 
+  // Check for high-frequency concurrent lock storms
+  hints.push(...checkMicroQueryLockStorm(result.sessions));
+
   if (hints.length > 0) {
     const rows = hints.map((h) => ({
       snapshotId: result.snapshotId,
@@ -291,3 +294,59 @@ async function checkConnectionSpike(
 
   return hints;
 }
+
+/**
+ * Rule 6: micro_query_lock_storm
+ * Detects multiple concurrent active sessions executing write/locking operations or contending on locks.
+ */
+function checkMicroQueryLockStorm(sessions: SessionRow[]): GeneratedHint[] {
+  const hints: GeneratedHint[] = [];
+  const writeLockSessions = sessions.filter(
+    (s) =>
+      s.state === "active" &&
+      s.query_text &&
+      /^\s*(UPDATE|DELETE|INSERT|SELECT\s+[\s\S]*\s+FOR\s+(UPDATE|SHARE|KEY\s+SHARE|NO\s+KEY\s+UPDATE)|LOCK)/i.test(
+        s.query_text
+      )
+  );
+
+  if (writeLockSessions.length < 3) return hints;
+
+  // Group by query pattern snippet
+  const queryGroups = new Map<string, SessionRow[]>();
+  for (const s of writeLockSessions) {
+    const key = (s.query_text || "").slice(0, 60).trim();
+    if (!queryGroups.has(key)) queryGroups.set(key, []);
+    queryGroups.get(key)!.push(s);
+  }
+
+  for (const [querySnippet, sessList] of queryGroups) {
+    if (sessList.length >= 3) {
+      const lockWaiting = sessList.filter(
+        (s) => s.wait_event_type === "Lock" || s.wait_event_type === "LWLock"
+      ).length;
+      const apps = Array.from(
+        new Set(sessList.map((s) => s.application_name || "unknown app"))
+      ).join(", ");
+
+      hints.push({
+        ruleType: "micro_query_lock_storm",
+        severity: lockWaiting > 0 || sessList.length >= 5 ? "critical" : "warning",
+        title: `Concurrent lock contention storm (${sessList.length} active sessions)`,
+        description: `${sessList.length} concurrent sessions from [${apps}] are executing "${querySnippet}…"${
+          lockWaiting > 0 ? ` with ${lockWaiting} sessions stalled on lock wait events` : ""
+        }. High concurrency on hot rows causes CPU spinlocks, lock queuing, and high CPU spikes. Consider batching writes or throttling worker concurrency.`,
+        metadata: {
+          concurrent_sessions: sessList.length,
+          lock_waiting_sessions: lockWaiting,
+          applications: apps,
+          query_snippet: querySnippet,
+          pids: sessList.map((s) => s.pid),
+        },
+      });
+    }
+  }
+
+  return hints;
+}
+

@@ -5,6 +5,8 @@ import { decrypt } from "../lib/encryption.js";
 import { safeQuery } from "../lib/safe-query.js";
 import { config } from "../config.js";
 
+import { estimatePercentiles } from "./percentile-calculator.js";
+
 /* ===================================================================
    Query Stats Collector — polls pg_stat_statements for query metrics
    =================================================================== */
@@ -18,10 +20,13 @@ interface PgStatStatementsRow {
   mean_time_ms: string;
   max_time_ms: string;
   min_time_ms: string;
+  stddev_exec_time?: string;
   rows: string;
   shared_blks_hit: string;
   shared_blks_read: string;
   temp_blks_written: string;
+  blk_read_time?: string;
+  blk_write_time?: string;
 }
 
 const CHECK_EXTENSION_QUERY = `
@@ -37,10 +42,13 @@ SELECT
   mean_exec_time AS mean_time_ms,
   max_exec_time AS max_time_ms,
   min_exec_time AS min_time_ms,
+  COALESCE(stddev_exec_time, 0)::text AS stddev_exec_time,
   rows::text,
   shared_blks_hit::text,
   shared_blks_read::text,
-  COALESCE(temp_blks_written, 0)::text AS temp_blks_written
+  COALESCE(temp_blks_written, 0)::text AS temp_blks_written,
+  COALESCE(blk_read_time, 0)::text AS blk_read_time,
+  COALESCE(blk_write_time, 0)::text AS blk_write_time
 FROM pg_stat_statements
 WHERE queryid IS NOT NULL
   AND query NOT LIKE '%pg_stat_statements%'
@@ -146,6 +154,18 @@ export async function collectQueryStats(
   const now = new Date();
   const statsRows = rows.map((r) => {
     const totalTimeMs = parseFloat(r.total_time_ms || "0");
+    const meanTimeMs = parseFloat(r.mean_time_ms || "0");
+    const maxTimeMs = parseFloat(r.max_time_ms || "0");
+    const minTimeMs = parseFloat(r.min_time_ms || "0");
+    const stddevExecTime = parseFloat(r.stddev_exec_time || "0");
+    const blkReadTime = parseFloat(r.blk_read_time || "0");
+    const blkWriteTime = parseFloat(r.blk_write_time || "0");
+
+    const percentiles = estimatePercentiles(meanTimeMs, stddevExecTime, minTimeMs, maxTimeMs);
+    const ioTimePercentage = totalTimeMs > 0
+      ? Math.round(((blkReadTime + blkWriteTime) / totalTimeMs) * 10000) / 100
+      : 0;
+
     return {
       monitoredDbId,
       capturedAt: now,
@@ -153,9 +173,9 @@ export async function collectQueryStats(
       queryText: r.query_text || "",
       calls: parseInt(r.calls, 10) || 0,
       totalTimeMs,
-      meanTimeMs: parseFloat(r.mean_time_ms || "0"),
-      maxTimeMs: parseFloat(r.max_time_ms || "0"),
-      minTimeMs: parseFloat(r.min_time_ms || "0"),
+      meanTimeMs,
+      maxTimeMs,
+      minTimeMs,
       rowsReturned: parseInt(r.rows, 10) || 0,
       sharedBlksHit: parseInt(r.shared_blks_hit, 10) || 0,
       sharedBlksRead: parseInt(r.shared_blks_read, 10) || 0,
@@ -163,6 +183,13 @@ export async function collectQueryStats(
       pctOfTotalTime: totalDbTime > 0
         ? Math.round((totalTimeMs / totalDbTime) * 10000) / 100
         : 0,
+      stddevExecTime,
+      p95ExecTime: percentiles.p95,
+      p99ExecTime: percentiles.p99,
+      varianceRatio: percentiles.varianceRatio,
+      blkReadTime,
+      blkWriteTime,
+      ioTimePercentage,
     };
   });
 

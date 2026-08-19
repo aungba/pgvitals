@@ -34,6 +34,74 @@ function formatTime(ts: string): string {
 }
 
 export default function AlertHistory({ alerts, onFeedback }: AlertHistoryProps) {
+  const [alertSortKey, setAlertSortKey] = React.useState<"severity" | "type" | "rootCause" | "firedAt" | "status">("firedAt");
+  const [alertSortDir, setAlertSortDir] = React.useState<"asc" | "desc">("desc");
+
+  const sortedAlerts = React.useMemo(() => {
+    return [...alerts].sort((a, b) => {
+      const dir = alertSortDir === "asc" ? 1 : -1;
+      switch (alertSortKey) {
+        case "severity": {
+          const rank = { critical: 2, warning: 1 };
+          return dir * ((rank[a.severity as keyof typeof rank] || 0) - (rank[b.severity as keyof typeof rank] || 0));
+        }
+        case "type": {
+          const nameA = ALERT_TYPE_NAMES[a.alertType] ?? a.alertType;
+          const nameB = ALERT_TYPE_NAMES[b.alertType] ?? b.alertType;
+          return dir * nameA.localeCompare(nameB);
+        }
+        case "rootCause": {
+          const rcA = a.rootCauseHint ?? "";
+          const rcB = b.rootCauseHint ?? "";
+          return dir * rcA.localeCompare(rcB);
+        }
+        case "status": {
+          const statusA = a.resolvedAt ? 1 : 0;
+          const statusB = b.resolvedAt ? 1 : 0;
+          return dir * (statusA - statusB);
+        }
+        case "firedAt":
+        default:
+          return dir * (new Date(a.firedAt).getTime() - new Date(b.firedAt).getTime());
+      }
+    });
+  }, [alerts, alertSortKey, alertSortDir]);
+
+  function handleAlertSort(key: typeof alertSortKey) {
+    if (alertSortKey === key) {
+      setAlertSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setAlertSortKey(key);
+      setAlertSortDir("desc");
+    }
+  }
+
+  function AlertSortHeader({
+    label,
+    k,
+    style,
+  }: {
+    label: string;
+    k: typeof alertSortKey;
+    style?: React.CSSProperties;
+  }) {
+    const isActive = alertSortKey === k;
+    return (
+      <th
+        className="alert-table-th"
+        onClick={() => handleAlertSort(k)}
+        style={{ ...style, cursor: "pointer", userSelect: "none" }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          {label}
+          <span style={{ fontSize: "0.7rem", color: isActive ? "var(--brand)" : "var(--text-muted)", opacity: isActive ? 1 : 0.4 }}>
+            {isActive ? (alertSortDir === "asc" ? "▲" : "▼") : "↕"}
+          </span>
+        </span>
+      </th>
+    );
+  }
+
   if (alerts.length === 0) {
     return (
       <div
@@ -55,16 +123,16 @@ export default function AlertHistory({ alerts, onFeedback }: AlertHistoryProps) 
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            <th className="alert-table-th" style={{ width: 40 }}></th>
-            <th className="alert-table-th">Type</th>
-            <th className="alert-table-th">Root Cause</th>
-            <th className="alert-table-th" style={{ width: 140 }}>Fired At</th>
-            <th className="alert-table-th" style={{ width: 100 }}>Status</th>
+            <AlertSortHeader label="Sev" k="severity" style={{ width: 65, textAlign: "center" }} />
+            <AlertSortHeader label="Type" k="type" style={{ width: 180 }} />
+            <AlertSortHeader label="Root Cause" k="rootCause" />
+            <AlertSortHeader label="Fired At" k="firedAt" style={{ width: 140 }} />
+            <AlertSortHeader label="Status" k="status" style={{ width: 100 }} />
             <th className="alert-table-th" style={{ width: 90 }}>Helpful?</th>
           </tr>
         </thead>
         <tbody>
-          {alerts.map((alert) => {
+          {sortedAlerts.map((alert) => {
             const isResolved = alert.resolvedAt !== null;
             return (
               <tr
