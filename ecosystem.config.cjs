@@ -4,7 +4,7 @@ module.exports = {
       name: "pgvitals-collector",
       cwd: "/opt/pgvitals",
       script: "apps/collector/dist/index.js",
-      node_args: "--env-file=apps/collector/.env",
+      node_args: "--env-file=/opt/pgvitals/.env",
       instances: 1,
       exec_mode: "fork",
       env: {
@@ -21,6 +21,7 @@ module.exports = {
       cwd: "/opt/pgvitals/apps/web",
       script: "node_modules/next/dist/bin/next",
       args: "start -p 3000 -H 0.0.0.0",
+      node_args: "--env-file=/opt/pgvitals/.env",
       instances: 1,
       exec_mode: "fork",
       env: {
