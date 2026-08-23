@@ -35,13 +35,16 @@ pipeline {
         stage('Checkout GitHub Repository') {
             agent any
             steps {
-                // Fix permissions and clean leftover files from previous Docker builds
-                sh 'docker run --rm -v "$WORKSPACE:/ws" alpine sh -c "chmod -R 777 /ws 2>/dev/null || true; find /ws -user root -exec rm -rf {} + 2>/dev/null; true"'
+                // Wipe workspace completely as root to clear corrupted .git or root-owned files from previous builds
+                sh 'docker run --rm -v "$WORKSPACE:/ws" alpine sh -c "chmod -R 777 /ws 2>/dev/null || true; rm -rf /ws/* /ws/.[!.]* /ws/..?* 2>/dev/null || true"'
 
                 echo "Checking out branch '${params.BRANCH_NAME}' from GitHub..."
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: "refs/heads/${params.BRANCH_NAME}"]],
+                    extensions: [
+                        [$class: 'CleanBeforeCheckout']
+                    ],
                     userRemoteConfigs: [[
                         url: 'https://github.com/aungba/pgvitals.git',
                         credentialsId: "${env.GITHUB_CREDENTIALS_ID}"
