@@ -104,7 +104,7 @@ pipeline {
                     chmod -R 777 . || true
                 '''
 
-                stash includes: '**', excludes: '**/node_modules/**,**/.git/**,**/.pnpm-store/**', name: 'build'
+                stash includes: '**,apps/web/.next/**', excludes: '**/node_modules/**,**/.git/**,**/.pnpm-store/**', name: 'build'
             }
         }
 
@@ -121,6 +121,7 @@ pipeline {
                           --exclude '.git' \
                           --exclude 'node_modules' \
                           --exclude '.env' \
+                          --exclude 'apps/*/.env' \
                           -e 'ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no' \
                           ./ ${env.DEPLOY_USER}@${env.DEPLOY_HOST}:${env.APP_DIR}/
                     """
@@ -133,6 +134,9 @@ pipeline {
                             export CI=true
                             corepack enable || true
                             pnpm install --frozen-lockfile || pnpm install --frozen-lockfile --ignore-scripts
+                            # Ensure sub-apps have .env if root .env exists
+                            [ -f .env ] && [ ! -f apps/collector/.env ] && cp .env apps/collector/.env || true
+                            [ -f .env ] && [ ! -f apps/web/.env ] && cp .env apps/web/.env || true
                         '
                     """
 
@@ -169,11 +173,45 @@ pipeline {
                     sh """
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             echo "Checking Collector API health..."
-                            sleep 3
-                            curl -sf http://localhost:3001/health || (echo "Collector health check failed!" && exit 1)
+                            COLLECTOR_OK=0
+                            for i in \$(seq 1 15); do
+                                if curl -sf http://localhost:3001/health; then
+                                    echo "\\nCollector API is healthy."
+                                    COLLECTOR_OK=1
+                                    break
+                                fi
+                                echo "Waiting for Collector API... (\$i/15)"
+                                sleep 2
+                            done
+                            if [ "\$COLLECTOR_OK" != "1" ]; then
+                                echo "Collector health check failed!"
+                                pm2 status
+                                cat /var/log/pgvitals/collector-error.log 2>/dev/null | tail -n 30 || true
+                                exit 1
+                            fi
 
                             echo "Checking Web Dashboard response..."
-                            curl -sf -o /dev/null http://localhost:3000 || (echo "Web app health check failed!" && exit 1)
+                            WEB_OK=0
+                            for i in \$(seq 1 15); do
+                                STATUS=\$(curl -s -o /dev/null -w "%{http_code}" -L http://localhost:3000 || echo "000")
+                                if [ "\$STATUS" = "200" ] || [ "\$STATUS" = "307" ] || [ "\$STATUS" = "308" ] || [ "\$STATUS" = "302" ]; then
+                                    echo "Web Dashboard is healthy (HTTP \$STATUS)."
+                                    WEB_OK=1
+                                    break
+                                fi
+                                echo "Waiting for Web Dashboard... (HTTP \$STATUS, attempt \$i/15)"
+                                sleep 2
+                            done
+                            if [ "\$WEB_OK" != "1" ]; then
+                                echo "Web app health check failed! Final status: \$STATUS"
+                                echo "=== PM2 Status ==="
+                                pm2 status
+                                echo "=== Web Error Log (/var/log/pgvitals/web-error.log) ==="
+                                cat /var/log/pgvitals/web-error.log 2>/dev/null | tail -n 40 || true
+                                echo "=== Web Output Log (/var/log/pgvitals/web-out.log) ==="
+                                cat /var/log/pgvitals/web-out.log 2>/dev/null | tail -n 40 || true
+                                exit 1
+                            fi
                         '
                     """
                 }
