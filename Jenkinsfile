@@ -54,7 +54,7 @@ pipeline {
                         credentialsId: "${env.GITHUB_CREDENTIALS_ID}"
                     ]]
                 ])
-                stash includes: '**', excludes: '.pnpm-store/**,node_modules/**', name: 'source'
+                stash includes: '**', excludes: '**/node_modules/**,**/.git/**,**/.pnpm-store/**', name: 'source'
             }
         }
 
@@ -104,7 +104,7 @@ pipeline {
                     chmod -R 777 . || true
                 '''
 
-                stash includes: '**', excludes: 'node_modules/**,.git/**,.pnpm-store/**', name: 'build'
+                stash includes: '**', excludes: '**/node_modules/**,**/.git/**,**/.pnpm-store/**', name: 'build'
             }
         }
 
