@@ -97,8 +97,12 @@ pipeline {
                     '''
                 }
 
-                // Fix file permissions: ensure host Jenkins agent (regardless of UID/GID) has full access
-                sh 'chmod -R 777 . || true'
+                // Fix file ownership & permissions: restore owner to Jenkins host user so unstash / setTimes succeeds
+                sh '''
+                    OWNER=$(stat -c '%u:%g' package.json 2>/dev/null || stat -c '%u:%g' . 2>/dev/null || echo "109:112")
+                    chown -R "$OWNER" . || true
+                    chmod -R 777 . || true
+                '''
 
                 stash includes: '**', excludes: 'node_modules/**,.git/**,.pnpm-store/**', name: 'build'
             }
