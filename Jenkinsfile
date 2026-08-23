@@ -172,19 +172,19 @@ pipeline {
             agent any
             steps {
                 echo 'Verifying application health...'
-                sleep 5
+                sleep 10
                 withCredentials([sshUserPrivateKey(credentialsId: env.DEPLOY_SSH_CREDENTIALS_ID, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
                     sh """
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DEPLOY_USER}@${env.DEPLOY_HOST} '
                             echo "Checking Collector API health..."
                             COLLECTOR_OK=0
-                            for i in \$(seq 1 15); do
-                                if curl -sf http://localhost:3001/health; then
+                            for i in \$(seq 1 20); do
+                                if curl -sf http://127.0.0.1:3001/health; then
                                     echo "\\nCollector API is healthy."
                                     COLLECTOR_OK=1
                                     break
                                 fi
-                                echo "Waiting for Collector API... (\$i/15)"
+                                echo "Waiting for Collector API... (\$i/20)"
                                 sleep 2
                             done
                             if [ "\$COLLECTOR_OK" != "1" ]; then
@@ -196,7 +196,7 @@ pipeline {
 
                             echo "Checking Web Dashboard response..."
                             WEB_OK=0
-                            for i in \$(seq 1 15); do
+                            for i in \$(seq 1 20); do
                                 STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/sign-in || echo "000")
                                 if [ "\$STATUS" = "200" ] || [ "\$STATUS" = "307" ] || [ "\$STATUS" = "308" ] || [ "\$STATUS" = "302" ]; then
                                     echo "Web Dashboard is healthy (HTTP \$STATUS at /sign-in)."
@@ -209,8 +209,8 @@ pipeline {
                                     WEB_OK=1
                                     break
                                 fi
-                                echo "Waiting for Web Dashboard... (sign-in: HTTP \$STATUS, root: HTTP \$STATUS_ROOT, attempt \$i/15)"
-                                sleep 2
+                                echo "Waiting for Web Dashboard... (sign-in: HTTP \$STATUS, root: HTTP \$STATUS_ROOT, attempt \$i/20)"
+                                sleep 3
                             done
                             if [ "\$WEB_OK" != "1" ]; then
                                 echo "Web app health check failed! Final status: \$STATUS"
