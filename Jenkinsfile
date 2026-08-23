@@ -134,9 +134,9 @@ pipeline {
                             export CI=true
                             corepack enable || true
                             pnpm install --frozen-lockfile || pnpm install --frozen-lockfile --ignore-scripts
-                            # Ensure sub-apps have .env if root .env exists
-                            [ -f .env ] && [ ! -f apps/collector/.env ] && cp .env apps/collector/.env || true
-                            [ -f .env ] && [ ! -f apps/web/.env ] && cp .env apps/web/.env || true
+                            # Always copy root .env to sub-apps to ensure latest keys are active
+                            [ -f .env ] && cp -f .env apps/collector/.env || true
+                            [ -f .env ] && cp -f .env apps/web/.env || true
                         '
                     """
 
@@ -155,6 +155,10 @@ pipeline {
                             cd ${env.APP_DIR}
                             export PATH="/usr/local/bin:\$PATH"
                             mkdir -p /var/log/pgvitals
+                            > /var/log/pgvitals/collector-error.log 2>/dev/null || true
+                            > /var/log/pgvitals/collector-out.log 2>/dev/null || true
+                            > /var/log/pgvitals/web-error.log 2>/dev/null || true
+                            > /var/log/pgvitals/web-out.log 2>/dev/null || true
                             pm2 delete all 2>/dev/null || true
                             pm2 start ecosystem.config.cjs
                             pm2 save
