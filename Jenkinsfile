@@ -197,13 +197,19 @@ pipeline {
                             echo "Checking Web Dashboard response..."
                             WEB_OK=0
                             for i in \$(seq 1 15); do
-                                STATUS=\$(curl -s -o /dev/null -w "%{http_code}" -L http://localhost:3000 || echo "000")
+                                STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/sign-in || echo "000")
                                 if [ "\$STATUS" = "200" ] || [ "\$STATUS" = "307" ] || [ "\$STATUS" = "308" ] || [ "\$STATUS" = "302" ]; then
-                                    echo "Web Dashboard is healthy (HTTP \$STATUS)."
+                                    echo "Web Dashboard is healthy (HTTP \$STATUS at /sign-in)."
                                     WEB_OK=1
                                     break
                                 fi
-                                echo "Waiting for Web Dashboard... (HTTP \$STATUS, attempt \$i/15)"
+                                STATUS_ROOT=\$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/ || echo "000")
+                                if [ "\$STATUS_ROOT" = "200" ] || [ "\$STATUS_ROOT" = "307" ] || [ "\$STATUS_ROOT" = "308" ] || [ "\$STATUS_ROOT" = "302" ]; then
+                                    echo "Web Dashboard is healthy (HTTP \$STATUS_ROOT at /)."
+                                    WEB_OK=1
+                                    break
+                                fi
+                                echo "Waiting for Web Dashboard... (sign-in: HTTP \$STATUS, root: HTTP \$STATUS_ROOT, attempt \$i/15)"
                                 sleep 2
                             done
                             if [ "\$WEB_OK" != "1" ]; then
