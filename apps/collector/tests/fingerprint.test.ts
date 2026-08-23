@@ -47,6 +47,26 @@ describe("hintToAlertType", () => {
     expect(hintToAlertType("plan_regression")).toBe("monitoring_failure");
   });
 
+  it("should map wal_retention_risk → wal_retention_risk", () => {
+    expect(hintToAlertType("wal_retention_risk")).toBe("wal_retention_risk");
+  });
+
+  it("should map replication_slot_stalled → replication_slot_stalled", () => {
+    expect(hintToAlertType("replication_slot_stalled")).toBe("replication_slot_stalled");
+  });
+
+  it("should map invalid_indexes → invalid_indexes", () => {
+    expect(hintToAlertType("invalid_indexes")).toBe("invalid_indexes");
+  });
+
+  it("should map lock_queue_storm → lock_queue_storm", () => {
+    expect(hintToAlertType("lock_queue_storm")).toBe("lock_queue_storm");
+  });
+
+  it("should map checkpoint_sync_stall → checkpoint_sync_stall", () => {
+    expect(hintToAlertType("checkpoint_sync_stall")).toBe("checkpoint_sync_stall");
+  });
+
   it("should return null for unknown rule types", () => {
     expect(hintToAlertType("unknown_rule")).toBeNull();
     expect(hintToAlertType("")).toBeNull();
@@ -113,6 +133,31 @@ describe("generateFingerprint", () => {
   it("should generate plan_regression fingerprint with queryid", () => {
     const hint = makeHint("plan_regression", { queryid: 12345 });
     expect(generateFingerprint(dbId, hint)).toBe("plan_regress:db-123:12345");
+  });
+
+  it("should generate wal_retention_risk fingerprint with slot_name", () => {
+    const hint = makeHint("wal_retention_risk", { slot_name: "debezium_cdc" });
+    expect(generateFingerprint(dbId, hint)).toBe("wal_retention:db-123:debezium_cdc");
+  });
+
+  it("should generate replication_slot_stalled fingerprint with slot_name", () => {
+    const hint = makeHint("replication_slot_stalled", { slot_name: "replica_standby" });
+    expect(generateFingerprint(dbId, hint)).toBe("slot_stalled:db-123:replica_standby");
+  });
+
+  it("should generate invalid_indexes fingerprint with index_name", () => {
+    const hint = makeHint("invalid_indexes", { index_name: "idx_broken_users" });
+    expect(generateFingerprint(dbId, hint)).toBe("invalid_idx:db-123:idx_broken_users");
+  });
+
+  it("should generate lock_queue_storm fingerprint with root_pid", () => {
+    const hint = makeHint("lock_queue_storm", { root_pid: 9999 });
+    expect(generateFingerprint(dbId, hint)).toBe("lock_storm:db-123:9999");
+  });
+
+  it("should generate checkpoint_sync_stall fingerprint (db-level)", () => {
+    const hint = makeHint("checkpoint_sync_stall", {});
+    expect(generateFingerprint(dbId, hint)).toBe("checkpoint_sync:db-123");
   });
 
   it("should generate 'unknown' fingerprint for unrecognized rule types", () => {

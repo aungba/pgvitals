@@ -17,6 +17,9 @@ import { monitoredDatabases } from "./organizations.js";
 export const recommendationTypeEnum = pgEnum("recommendation_type", [
   "unused",
   "missing",
+  "invalid",
+  "redundant",
+  "bloat",
 ]);
 
 /**

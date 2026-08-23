@@ -17,7 +17,7 @@ import type { Database, IndexRecommendation, IndexSimulationResult } from "../..
    Index Advisor Page — Enhanced UI
    =================================================================== */
 
-type FilterType = "all" | "unused" | "missing" | "high_impact" | "medium_impact";
+type FilterType = "all" | "unused" | "missing" | "invalid" | "redundant" | "bloat" | "high_impact" | "medium_impact";
 type SortOption = "impact" | "size" | "scans" | "table" | "newest";
 type ViewMode = "cards" | "table";
 
@@ -36,10 +36,15 @@ function formatNumber(n: number): string {
 
 function getSafeDdl(rec: IndexRecommendation, concurrently: boolean): string {
   if (!rec.suggestedDdl) return "";
-  if (rec.recommendationType === "unused" && rec.indexName) {
+  if ((rec.recommendationType === "unused" || rec.recommendationType === "invalid" || rec.recommendationType === "redundant") && rec.indexName) {
     return concurrently
       ? `DROP INDEX CONCURRENTLY IF EXISTS "${rec.indexName}";`
       : `DROP INDEX IF EXISTS "${rec.indexName}";`;
+  }
+  if (rec.recommendationType === "bloat" && rec.indexName) {
+    return concurrently
+      ? `REINDEX INDEX CONCURRENTLY "${rec.indexName}";`
+      : `REINDEX INDEX "${rec.indexName}";`;
   }
   return rec.suggestedDdl;
 }
@@ -126,15 +131,18 @@ export default function IndexAdvisorPage() {
   // Aggregated Summary Statistics
   const unusedCount = useMemo(() => recommendations.filter((r) => r.recommendationType === "unused").length, [recommendations]);
   const missingCount = useMemo(() => recommendations.filter((r) => r.recommendationType === "missing").length, [recommendations]);
+  const invalidCount = useMemo(() => recommendations.filter((r) => r.recommendationType === "invalid").length, [recommendations]);
+  const redundantCount = useMemo(() => recommendations.filter((r) => r.recommendationType === "redundant").length, [recommendations]);
+  const bloatCount = useMemo(() => recommendations.filter((r) => r.recommendationType === "bloat").length, [recommendations]);
   const highImpactCount = useMemo(() => recommendations.filter((r) => r.impact === "high").length, [recommendations]);
   const mediumImpactCount = useMemo(() => recommendations.filter((r) => r.impact === "medium").length, [recommendations]);
 
   const totalReclaimableBytes = useMemo(() => {
     return recommendations
-      .filter((r) => r.recommendationType === "unused")
+      .filter((r) => r.recommendationType === "unused" || r.recommendationType === "invalid" || r.recommendationType === "redundant" || r.recommendationType === "bloat")
       .reduce((sum, r) => {
         const meta = r.metadata as Record<string, number | string | undefined>;
-        return sum + (Number(meta?.index_size_bytes) || 0);
+        return sum + (Number(meta?.bloat_bytes || meta?.index_size_bytes || meta?.redundant_index_size) || 0);
       }, 0);
   }, [recommendations]);
 
@@ -156,6 +164,12 @@ export default function IndexAdvisorPage() {
       list = list.filter((r) => r.recommendationType === "unused");
     } else if (filter === "missing") {
       list = list.filter((r) => r.recommendationType === "missing");
+    } else if (filter === "invalid") {
+      list = list.filter((r) => r.recommendationType === "invalid");
+    } else if (filter === "redundant") {
+      list = list.filter((r) => r.recommendationType === "redundant");
+    } else if (filter === "bloat") {
+      list = list.filter((r) => r.recommendationType === "bloat");
     } else if (filter === "high_impact") {
       list = list.filter((r) => r.impact === "high");
     } else if (filter === "medium_impact") {
@@ -265,13 +279,13 @@ export default function IndexAdvisorPage() {
       </div>
 
       {/* Summary cards with Opportunity Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-md)", marginBottom: "var(--space-lg)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "var(--space-md)", marginBottom: "var(--space-lg)" }}>
         <SummaryCard
           icon="🗑️"
           label="Unused Indexes"
           count={unusedCount}
           color="var(--signal-warning)"
-          description={`${formatBytes(totalReclaimableBytes)} reclaimable disk`}
+          description="0 scans since stats reset"
         />
         <SummaryCard
           icon="🔎"
@@ -281,18 +295,32 @@ export default function IndexAdvisorPage() {
           description={`${formatNumber(totalSeqScans)} unindexed seq scans`}
         />
         <SummaryCard
-          icon="⚡"
-          label="High Impact"
-          count={highImpactCount}
+          icon="⚠️"
+          label="Invalid Indexes"
+          count={invalidCount}
           color="var(--signal-critical)"
-          description="Requires immediate review"
+          description="Corrupted / aborted builds"
+        />
+        <SummaryCard
+          icon="🔄"
+          label="Redundant Indexes"
+          count={redundantCount}
+          color="var(--signal-idle)"
+          description="Covered by prefix indexes"
+        />
+        <SummaryCard
+          icon="🗜️"
+          label="Bloated Indexes"
+          count={bloatCount}
+          color="var(--signal-warning)"
+          description="Reindex candidates (>30% bloat)"
         />
         <SummaryCard
           icon="📋"
           label="Total Active"
           count={recommendations.length}
           color="var(--brand)"
-          description="Recommendations detected"
+          description={`${formatBytes(totalReclaimableBytes)} reclaimable disk`}
         />
       </div>
 
@@ -333,6 +361,33 @@ export default function IndexAdvisorPage() {
             >
               🔎 Missing ({missingCount})
             </button>
+            {invalidCount > 0 && (
+              <button
+                className="filter-chip"
+                data-active={filter === "invalid"}
+                onClick={() => setFilter("invalid")}
+              >
+                ⚠️ Invalid ({invalidCount})
+              </button>
+            )}
+            {redundantCount > 0 && (
+              <button
+                className="filter-chip"
+                data-active={filter === "redundant"}
+                onClick={() => setFilter("redundant")}
+              >
+                🔄 Redundant ({redundantCount})
+              </button>
+            )}
+            {bloatCount > 0 && (
+              <button
+                className="filter-chip"
+                data-active={filter === "bloat"}
+                onClick={() => setFilter("bloat")}
+              >
+                🗜️ Bloat ({bloatCount})
+              </button>
+            )}
             {highImpactCount > 0 && (
               <button
                 className="filter-chip"
@@ -536,15 +591,41 @@ export default function IndexAdvisorPage() {
                   <tr key={rec.id} className="alert-table-row" style={{ opacity: rec.dismissed ? 0.6 : 1 }}>
                     <td className="alert-table-td">
                       <span style={{
-                        background: isUnused ? "var(--signal-warning-dim)" : "var(--signal-critical-dim)",
-                        color: isUnused ? "var(--signal-warning)" : "var(--signal-critical)",
+                        background: rec.recommendationType === "unused"
+                          ? "var(--signal-warning-dim)"
+                          : rec.recommendationType === "invalid"
+                          ? "var(--signal-critical-dim)"
+                          : rec.recommendationType === "redundant"
+                          ? "var(--surface-alt)"
+                          : rec.recommendationType === "bloat"
+                          ? "var(--signal-warning-dim)"
+                          : "var(--brand-dim)",
+                        color: rec.recommendationType === "unused"
+                          ? "var(--signal-warning)"
+                          : rec.recommendationType === "invalid"
+                          ? "var(--signal-critical)"
+                          : rec.recommendationType === "redundant"
+                          ? "var(--signal-idle)"
+                          : rec.recommendationType === "bloat"
+                          ? "var(--signal-warning)"
+                          : "var(--brand)",
                         padding: "2px 8px",
                         borderRadius: "var(--radius-full)",
                         fontSize: "0.7rem",
                         fontWeight: 700,
                         textTransform: "uppercase",
                       }}>
-                        {isUnused ? "🗑️ Unused" : "🔎 Missing"}
+                        {rec.recommendationType === "unused"
+                          ? "🗑️ Unused"
+                          : rec.recommendationType === "missing"
+                          ? "🔎 Missing"
+                          : rec.recommendationType === "invalid"
+                          ? "⚠️ Invalid"
+                          : rec.recommendationType === "redundant"
+                          ? "🔄 Redundant"
+                          : rec.recommendationType === "bloat"
+                          ? "🗜️ Bloated"
+                          : rec.recommendationType}
                       </span>
                     </td>
                     <td className="alert-table-td">
@@ -570,7 +651,11 @@ export default function IndexAdvisorPage() {
                       </span>
                     </td>
                     <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}>
-                      {isUnused && meta.index_size_bytes !== undefined ? (
+                      {rec.recommendationType === "bloat" && meta.bloat_bytes !== undefined ? (
+                        <span style={{ color: "var(--signal-warning)", fontWeight: 600 }}>
+                          {meta.bloat_pct}% ({formatBytes(Number(meta.bloat_bytes))})
+                        </span>
+                      ) : isUnused && meta.index_size_bytes !== undefined ? (
                         <span style={{ color: "var(--signal-warning)", fontWeight: 600 }}>
                           {formatBytes(Number(meta.index_size_bytes))}
                         </span>
@@ -688,8 +773,29 @@ function RecommendationCard({
   onToggleDef: () => void;
 }) {
   const isUnused = rec.recommendationType === "unused";
-  const borderColor = isUnused ? "var(--signal-warning)" : "var(--signal-critical)";
-  const bgColor = isUnused ? "var(--signal-warning-dim)" : "var(--signal-critical-dim)";
+  const isInvalid = rec.recommendationType === "invalid";
+  const isRedundant = rec.recommendationType === "redundant";
+  const isBloat = rec.recommendationType === "bloat";
+
+  const borderColor = isUnused
+    ? "var(--signal-warning)"
+    : isInvalid
+    ? "var(--signal-critical)"
+    : isRedundant
+    ? "var(--signal-idle)"
+    : isBloat
+    ? "var(--signal-warning)"
+    : "var(--brand)";
+  const bgColor = isUnused
+    ? "var(--signal-warning-dim)"
+    : isInvalid
+    ? "var(--signal-critical-dim)"
+    : isRedundant
+    ? "var(--surface-alt)"
+    : isBloat
+    ? "var(--signal-warning-dim)"
+    : "var(--brand-dim)";
+
   const impactColors: Record<string, string> = {
     high: "var(--signal-critical)",
     medium: "var(--signal-warning)",
@@ -698,6 +804,16 @@ function RecommendationCard({
 
   const meta = (rec.metadata ?? {}) as Record<string, number | string | undefined>;
   const activeDdl = getSafeDdl(rec, concurrently);
+
+  const typeLabel = isUnused
+    ? "🗑️ Unused Index"
+    : isInvalid
+    ? "⚠️ Invalid Index"
+    : isRedundant
+    ? "🔄 Redundant Index"
+    : isBloat
+    ? "🗜️ Bloated Index"
+    : "🔎 Missing Index";
 
   return (
     <div
@@ -723,7 +839,7 @@ function RecommendationCard({
                 textTransform: "uppercase",
               }}
             >
-              {isUnused ? "🗑️ Unused Index" : "🔎 Missing Index"}
+              {typeLabel}
             </span>
             <span
               style={{

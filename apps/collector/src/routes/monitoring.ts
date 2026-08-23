@@ -46,17 +46,76 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
 
         // Get the latest snapshot
         const [latestSnapshot] = await db
-          .select()
+          .select({
+            id: snapshots.id,
+            timestamp: snapshots.timestamp,
+            connectionCount: snapshots.connectionCount,
+            activeCount: snapshots.activeCount,
+            idleCount: snapshots.idleCount,
+            idleInTxnCount: snapshots.idleInTxnCount,
+            idleInTxnAbortedCount: snapshots.idleInTxnAbortedCount,
+            maxConnections: snapshots.maxConnections,
+          })
           .from(snapshots)
           .where(eq(snapshots.monitoredDbId, id))
           .orderBy(desc(snapshots.timestamp))
           .limit(1);
+
+        // Get the latest health snapshot
+        let latestHealth: {
+          cacheHitRatio: number | null;
+          dbSizeBytes: number | null;
+          tempFileBytes: number | null;
+          numBackends: number | null;
+          xactCommit: number | null;
+          xactRollback: number | null;
+          deadlocksCount: number | null;
+          capturedAt: Date;
+        } | null = null;
+
+        try {
+          const [foundHealth] = await db
+            .select({
+              cacheHitRatio: dbHealthSnapshots.cacheHitRatio,
+              dbSizeBytes: dbHealthSnapshots.dbSizeBytes,
+              tempFileBytes: dbHealthSnapshots.tempFileBytes,
+              numBackends: dbHealthSnapshots.numBackends,
+              xactCommit: dbHealthSnapshots.xactCommit,
+              xactRollback: dbHealthSnapshots.xactRollback,
+              deadlocksCount: dbHealthSnapshots.deadlocksCount,
+              capturedAt: dbHealthSnapshots.capturedAt,
+            })
+            .from(dbHealthSnapshots)
+            .where(eq(dbHealthSnapshots.monitoredDbId, id))
+            .orderBy(desc(dbHealthSnapshots.capturedAt))
+            .limit(1);
+
+          if (foundHealth) {
+            latestHealth = foundHealth;
+          }
+        } catch (healthErr) {
+          request.log.warn({ err: healthErr }, "Failed to fetch db health snapshot for overview");
+        }
+
+        const healthData = latestHealth
+          ? {
+              cacheHitRatio: latestHealth.cacheHitRatio,
+              dbSizeBytes: latestHealth.dbSizeBytes,
+              tempFileBytes: latestHealth.tempFileBytes,
+              numBackends: latestHealth.numBackends,
+              xactCommit: latestHealth.xactCommit,
+              xactRollback: latestHealth.xactRollback,
+              deadlocksCount: latestHealth.deadlocksCount,
+              capturedAt: latestHealth.capturedAt,
+            }
+          : null;
 
         if (!latestSnapshot) {
           return reply.send({
             database: mdb,
             snapshot: null,
             utilization: null,
+            health: healthData,
           });
         }
 
@@ -66,14 +125,6 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
                 (latestSnapshot.connectionCount / latestSnapshot.maxConnections) * 100
               )
             : 0;
-
-        // Get the latest health snapshot
-        const [latestHealth] = await db
-          .select()
-          .from(dbHealthSnapshots)
-          .where(eq(dbHealthSnapshots.monitoredDbId, id))
-          .orderBy(desc(dbHealthSnapshots.capturedAt))
-          .limit(1);
 
         return reply.send({
           database: mdb,
@@ -92,18 +143,7 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
             connectionCount: latestSnapshot.connectionCount,
             maxConnections: latestSnapshot.maxConnections,
           },
-          health: latestHealth
-            ? {
-                cacheHitRatio: latestHealth.cacheHitRatio,
-                dbSizeBytes: latestHealth.dbSizeBytes,
-                tempFileBytes: latestHealth.tempFileBytes,
-                numBackends: latestHealth.numBackends,
-                xactCommit: latestHealth.xactCommit,
-                xactRollback: latestHealth.xactRollback,
-                deadlocksCount: latestHealth.deadlocksCount,
-                capturedAt: latestHealth.capturedAt,
-              }
-            : null,
+          health: healthData,
         });
       } catch (err) {
         request.log.error({ err }, "Failed to get overview");

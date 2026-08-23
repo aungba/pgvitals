@@ -41,6 +41,7 @@ export {
 
 export {
   replicationSnapshots,
+  replicationSlotSnapshots,
 } from "./replication.js";
 
 export {

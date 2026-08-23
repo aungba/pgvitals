@@ -50,6 +50,9 @@ export const tableBloatStats = pgTable(
     idxCacheHitRatio: doublePrecision("idx_cache_hit_ratio"),
     estimatedBloatBytes: bigint("estimated_bloat_bytes", { mode: "number" }),
     estimatedBloatPct: doublePrecision("estimated_bloat_pct"),
+    nHotUpd: bigint("n_hot_upd", { mode: "number" }),
+    nUpd: bigint("n_upd", { mode: "number" }),
+    hotUpdateRatio: doublePrecision("hot_update_ratio"),
   },
   (table) => [primaryKey({ columns: [table.id, table.capturedAt] })]
 );
@@ -80,7 +83,7 @@ export const tableSizeHistory = pgTable(
 );
 
 /**
- * Database health snapshots — cluster-wide metrics (WAL, checkpoints, cache).
+ * Database health snapshots — cluster-wide metrics (WAL, checkpoints, cache, archiving).
  */
 export const dbHealthSnapshots = pgTable("db_health_snapshots", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -95,6 +98,13 @@ export const dbHealthSnapshots = pgTable("db_health_snapshots", {
   checkpointsTimed: integer("checkpoints_timed"),
   buffersCheckpoint: bigint("buffers_checkpoint", { mode: "number" }),
   buffersBackend: bigint("buffers_backend", { mode: "number" }),
+  checkpointWriteTime: doublePrecision("checkpoint_write_time"),
+  checkpointSyncTime: doublePrecision("checkpoint_sync_time"),
+  walVelocityMbPerMin: doublePrecision("wal_velocity_mb_per_min"),
+  archivedWalCount: bigint("archived_wal_count", { mode: "number" }),
+  failedWalCount: bigint("failed_wal_count", { mode: "number" }),
+  lastArchivedWal: varchar("last_archived_wal", { length: 64 }),
+  lastFailedWal: varchar("last_failed_wal", { length: 64 }),
   dbSizeBytes: bigint("db_size_bytes", { mode: "number" }),
   numBackends: integer("num_backends"),
   xactCommit: bigint("xact_commit", { mode: "number" }),

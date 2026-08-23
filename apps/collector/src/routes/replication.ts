@@ -1,10 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import { db, replicationSnapshots, monitoredDatabases } from "@pgvitals/db";
+import { db, replicationSnapshots, replicationSlotSnapshots, monitoredDatabases } from "@pgvitals/db";
 import { eq, desc, and, gte } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 
 /* ===================================================================
-   Replication Lag Routes — Phase 7
+   Replication Lag & Slots Routes — Phase 1 & Phase 7
    =================================================================== */
 
 /**
@@ -31,12 +31,10 @@ export default async function replicationRoutes(app: FastifyInstance): Promise<v
       try {
         const { id } = request.params;
 
-        // Verify database belongs to this org
         if (!await verifyDbOwnership(id, request.auth.orgId)) {
           return reply.status(404).send({ error: "Database not found" });
         }
 
-        // Get latest captured_at
         const [latest] = await db
           .select({ capturedAt: replicationSnapshots.capturedAt })
           .from(replicationSnapshots)
@@ -48,7 +46,6 @@ export default async function replicationRoutes(app: FastifyInstance): Promise<v
           return reply.send({ replicas: [], capturedAt: null });
         }
 
-        // Get all replicas from the latest snapshot
         const replicas = await db
           .select()
           .from(replicationSnapshots)
@@ -84,7 +81,7 @@ export default async function replicationRoutes(app: FastifyInstance): Promise<v
     async (request, reply) => {
       try {
         const { id } = request.params;
-        const hours = Math.min(parseInt(request.query.hours ?? "24", 10), 168); // max 7 days
+        const hours = Math.min(parseInt(request.query.hours ?? "24", 10), 168);
         const replicaFilter = request.query.replica;
 
         if (!await verifyDbOwnership(id, request.auth.orgId)) {
@@ -93,7 +90,7 @@ export default async function replicationRoutes(app: FastifyInstance): Promise<v
 
         const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-        let query = db
+        const history = await db
           .select({
             capturedAt: replicationSnapshots.capturedAt,
             replicaName: replicationSnapshots.replicaName,
@@ -114,8 +111,6 @@ export default async function replicationRoutes(app: FastifyInstance): Promise<v
           .orderBy(replicationSnapshots.capturedAt)
           .limit(2000);
 
-        const history = await query;
-
         return reply.send({
           history: history.map((h) => ({
             capturedAt: h.capturedAt.toISOString(),
@@ -128,6 +123,54 @@ export default async function replicationRoutes(app: FastifyInstance): Promise<v
       } catch (err) {
         request.log.error({ err }, "Failed to get replication history");
         return reply.status(500).send({ error: "Failed to get replication history" });
+      }
+    }
+  );
+
+  /**
+   * GET /api/databases/:id/replication/slots
+   * Latest replication slots and WAL retention metrics.
+   */
+  app.get<{ Params: { id: string } }>(
+    "/api/databases/:id/replication/slots",
+    { preHandler: [authMiddleware] },
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+
+        if (!await verifyDbOwnership(id, request.auth.orgId)) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const [latest] = await db
+          .select({ capturedAt: replicationSlotSnapshots.capturedAt })
+          .from(replicationSlotSnapshots)
+          .where(eq(replicationSlotSnapshots.monitoredDbId, id))
+          .orderBy(desc(replicationSlotSnapshots.capturedAt))
+          .limit(1);
+
+        if (!latest) {
+          return reply.send({ slots: [], capturedAt: null });
+        }
+
+        const slots = await db
+          .select()
+          .from(replicationSlotSnapshots)
+          .where(
+            and(
+              eq(replicationSlotSnapshots.monitoredDbId, id),
+              eq(replicationSlotSnapshots.capturedAt, latest.capturedAt)
+            )
+          )
+          .orderBy(desc(replicationSlotSnapshots.retainedBytes));
+
+        return reply.send({
+          slots: slots.map(serializeReplicationSlotSnapshot),
+          capturedAt: latest.capturedAt.toISOString(),
+        });
+      } catch (err) {
+        request.log.error({ err }, "Failed to get replication slots");
+        return reply.status(500).send({ error: "Failed to get replication slots" });
       }
     }
   );
@@ -150,5 +193,24 @@ function serializeReplicationSnapshot(row: typeof replicationSnapshots.$inferSel
     writeLagMs: row.writeLagMs,
     flushLagMs: row.flushLagMs,
     replayLagMs: row.replayLagMs,
+  };
+}
+
+/** Serializes a replication slot snapshot row for API response. */
+function serializeReplicationSlotSnapshot(row: typeof replicationSlotSnapshots.$inferSelect) {
+  return {
+    id: row.id,
+    capturedAt: row.capturedAt.toISOString(),
+    slotName: row.slotName,
+    plugin: row.plugin,
+    slotType: row.slotType,
+    active: row.active,
+    walStatus: row.walStatus,
+    retainedBytes: row.retainedBytes,
+    restartLsn: row.restartLsn,
+    confirmedFlushLsn: row.confirmedFlushLsn,
+    temporary: row.temporary,
+    conflicting: row.conflicting,
+    inactiveDurationSeconds: row.inactiveDurationSeconds,
   };
 }

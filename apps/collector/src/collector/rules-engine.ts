@@ -58,6 +58,9 @@ export async function evaluateRules(
   // Check for high-frequency concurrent lock storms
   hints.push(...checkMicroQueryLockStorm(result.sessions));
 
+  // Check for cascading lock queue storms and blocking root blockers
+  hints.push(...checkLockQueueStorm(result.sessions, result.blockingPairs));
+
   if (hints.length > 0) {
     const rows = hints.map((h) => ({
       snapshotId: result.snapshotId,
@@ -342,6 +345,56 @@ function checkMicroQueryLockStorm(sessions: SessionRow[]): GeneratedHint[] {
           applications: apps,
           query_snippet: querySnippet,
           pids: sessList.map((s) => s.pid),
+        },
+      });
+    }
+  }
+
+  return hints;
+}
+
+/**
+ * Rule 7: lock_queue_storm
+ * Detects cascading multi-session lock queues and DDL lock acquisitions blocking OLTP sessions.
+ */
+function checkLockQueueStorm(
+  sessions: SessionRow[],
+  blockingPairs: BlockingPair[]
+): GeneratedHint[] {
+  const hints: GeneratedHint[] = [];
+  if (blockingPairs.length < 2) return hints;
+
+  const blockerCounts = new Map<number, number>();
+  for (const pair of blockingPairs) {
+    blockerCounts.set(pair.blocking_pid, (blockerCounts.get(pair.blocking_pid) ?? 0) + 1);
+  }
+
+  const sessionByPid = new Map<number, SessionRow>();
+  for (const s of sessions) {
+    sessionByPid.set(s.pid, s);
+  }
+
+  for (const [rootPid, blockedCount] of blockerCounts) {
+    if (blockedCount >= 2) {
+      const rootSession = sessionByPid.get(rootPid);
+      const queryPreview = rootSession?.query_text?.substring(0, 100) ?? "idle / inactive";
+      const isDdl = rootSession?.query_text
+        ? /^\s*(ALTER\s+TABLE|CREATE\s+INDEX|DROP\s+TABLE|TRUNCATE|LOCK\s+TABLE)/i.test(rootSession.query_text)
+        : false;
+
+      hints.push({
+        ruleType: "lock_queue_storm",
+        severity: "critical",
+        title: `Lock queue storm: PID ${rootPid} is blocking ${blockedCount} sessions`,
+        description: isDdl
+          ? `DDL statement in PID ${rootPid} ("${queryPreview}") is holding an exclusive table lock and blocking ${blockedCount} incoming queries. This can quickly exhaust your connection pool. Terminate via: SELECT pg_terminate_backend(${rootPid});`
+          : `Session PID ${rootPid} ("${queryPreview}") is the root blocker for a cascade of ${blockedCount} waiting sessions. Terminate via: SELECT pg_terminate_backend(${rootPid});`,
+        metadata: {
+          root_pid: rootPid,
+          blocked_count: blockedCount,
+          root_query: rootSession?.query_text,
+          is_ddl: isDdl,
+          suggested_remediation: `SELECT pg_terminate_backend(${rootPid});`,
         },
       });
     }

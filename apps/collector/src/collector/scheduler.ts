@@ -13,6 +13,7 @@ import { analyzeIndexes } from "./index-advisor.js";
 import { collectVacuumHealth } from "./vacuum-health-collector.js";
 import { analyzeQuerySuggestions } from "./query-suggestions.js";
 import { collectReplicationLag } from "./replication-collector.js";
+import { collectReplicationSlots } from "./replication-slot-collector.js";
 import { collectLogInsights } from "./log-insights-collector.js";
 import { collectPlanSnapshots } from "./plan-regression-collector.js";
 import { collectPoolerStats } from "./pooler-collector.js";
@@ -236,6 +237,12 @@ export async function startScheduler(log: FastifyBaseLogger): Promise<void> {
         const replHints = await collectReplicationLag(data.monitoredDbId, jobLog);
         if (replHints.length > 0) {
           await evaluateHintsForDb(data.monitoredDbId, replHints, jobLog);
+        }
+
+        // Collect replication slots and guard against WAL accumulation
+        const slotHints = await collectReplicationSlots(data.monitoredDbId, jobLog);
+        if (slotHints.length > 0) {
+          await evaluateHintsForDb(data.monitoredDbId, slotHints, jobLog);
         }
 
         await collectLogInsights(data.monitoredDbId, jobLog);

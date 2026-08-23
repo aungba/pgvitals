@@ -1,7 +1,7 @@
 # PG Vitals — Detailed Technical Specification & Codebase Walkthrough
 
-> **Version:** 0.5.0 | **Last Updated:** 2026-08-19  
-> **Status:** All product phases 1–11 implemented. Includes Phase 11 Spec 5 features: P95/P99 latency percentiles, I/O timing diagnostics (`track_io_timing`), autovacuum starvation sentinel, and remote session remediation / Slack ChatOps. Test suite contains 105 tests across 12 test suites.
+> **Version:** 0.6.0 | **Last Updated:** 2026-08-19  
+> **Status:** All product phases 1–12 implemented. Includes Phase 12 Production DBA Sentinel Suite: Replication Slot WAL Retention Sentinel, Invalid (`indisvalid = false`) & Redundant Index Detection, B-Tree Index Bloat Estimator, Checkpoint Sync vs. Write Breakdown, WAL Velocity (MB/min), Archiver Health, HOT Update Efficiency, and Cascading Lock Queue Storm Sentinel. Test suite contains 115 tests across 12 test suites.
 
 ---
 
@@ -1233,19 +1233,24 @@ pnpm dev                          # Start collector (3001) + web (3000)
 | 9 | Query Plan Regression Detection | ✅ EXPLAIN capture + plan shape hash diffing | ✅ Plans page with timeline + regression markers | **Complete** |
 | 9 | PgBouncer Awareness | ✅ Pool metrics + pool exhaustion alerting | ✅ Pooler page with pool utilization dashboard | **Complete** |
 | 9 | Onboarding Wizard | ✅ Validate + capabilities endpoints | ✅ 7-step guided setup at /onboarding | **Complete** |
-| 10 | Cost-Per-Query Estimator | ✅ IO + CPU cost model with RDS defaults | ✅ Cost dashboard page | **Complete** |
 | 11 | P95/P99 Percentiles & Tail Latency | ✅ Continuous log-normal estimation algorithm | ✅ API endpoint + serializers | **Complete** |
 | 11 | Storage I/O Diagnostics (`track_io_timing`) | ✅ `pg_settings` check + stall heuristics | ✅ Diagnostics API + suggestion rules | **Complete** |
 | 11 | Autovacuum Starvation Sentinel | ✅ Worker pool saturation + starved candidate queries | ✅ Starvation API + event tracking | **Complete** |
 | 11 | Remote Session Termination & ChatOps | ✅ `pg_terminate_backend` API + Slack webhook HMAC | ✅ Interactive Slack Block Kit alerts | **Complete** |
+| 12 | Replication Slot WAL Sentinel | ✅ `pg_replication_slots` LSN diff + alert triggers | ✅ Slot table + drop slot action on Health/Replication | **Complete** |
+| 12 | Invalid & Redundant Index Detector | ✅ `indisvalid=false` + `indkey` subset queries | ✅ Card & Table views + safe concurrent DDL | **Complete** |
+| 12 | B-Tree Index Bloat Estimator | ✅ Tuple packing vs page allocation heuristic | ✅ REINDEX CONCURRENTLY advisor & filter chip | **Complete** |
+| 12 | Lock Queue Storm & Cascading Blocker | ✅ Root blocker & DDL exclusivity heuristics | ✅ Critical alert rule + kill query generation | **Complete** |
+| 12 | Checkpoint Sync/Write & WAL Velocity | ✅ `pg_stat_bgwriter`, `pg_stat_archiver`, LSN rate | ✅ Gauges on Health Overview | **Complete** |
+| 12 | HOT Update Efficiency & Autovacuum Tuner | ✅ `n_tup_hot_upd` / `n_tup_upd` tracking | ✅ Table bloat column + fillfactor/scale advice | **Complete** |
 | — | Data Retention | ✅ Tier-based (Free=1d, Pro=30d, Team=90d) | — | **Complete** |
 | — | Email Alerting | ✅ Nodemailer SMTP + HTML templates | ✅ SMTP config form + test button | **Complete** |
 | — | Query Text Redaction | ✅ Literal stripping before storage | — | **Complete** |
 | — | Plan-based Feature Gating | ✅ Pro/Team tier enforcement | — | **Complete** |
-| — | Test Suite | ✅ Vitest (105 tests, 12 suites) | — | **Complete** |
+| — | Test Suite | ✅ Vitest (115 tests, 12 suites) | — | **Complete** |
 
 > [!IMPORTANT]
-> **All phases 1–11 are fully implemented (backend + frontend/APIs).** Phase 3 auth (Clerk) and billing (Stripe) require external service credentials to connect in live production environments. All other features across all specifications are complete.
+> **All phases 1–12 are fully implemented (backend + frontend/APIs).** Phase 3 auth (Clerk) and billing (Stripe) require external service credentials to connect in live production environments. All other features across all specifications are complete.
 
 ---
 

@@ -27,3 +27,6 @@ Thumbs.db
 
 # Coverage
 coverage/
+*.tsbuildinfo
+jenkins_deploy_log.txt
+

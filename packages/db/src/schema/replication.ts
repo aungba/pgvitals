@@ -6,6 +6,7 @@ import {
   bigint,
   doublePrecision,
   primaryKey,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { monitoredDatabases } from "./organizations.js";
 
@@ -43,3 +44,32 @@ export const replicationSnapshots = pgTable(
   },
   (table) => [primaryKey({ columns: [table.id, table.capturedAt] })]
 );
+
+/**
+ * Replication slot snapshots — monitors pg_replication_slots to prevent WAL retention disk-full disasters.
+ */
+export const replicationSlotSnapshots = pgTable(
+  "replication_slot_snapshots",
+  {
+    id: uuid("id").defaultRandom().notNull(),
+    monitoredDbId: uuid("monitored_db_id")
+      .references(() => monitoredDatabases.id, { onDelete: "cascade" })
+      .notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    slotName: varchar("slot_name", { length: 255 }).notNull(),
+    plugin: varchar("plugin", { length: 128 }),
+    slotType: varchar("slot_type", { length: 64 }).notNull(), // 'physical' | 'logical'
+    active: boolean("active").notNull(),
+    walStatus: varchar("wal_status", { length: 64 }), // 'reserved', 'extended', 'unreserved', 'lost'
+    retainedBytes: bigint("retained_bytes", { mode: "number" }).default(0).notNull(),
+    restartLsn: varchar("restart_lsn", { length: 64 }),
+    confirmedFlushLsn: varchar("confirmed_flush_lsn", { length: 64 }),
+    temporary: boolean("temporary").default(false).notNull(),
+    conflicting: boolean("conflicting").default(false).notNull(),
+    inactiveDurationSeconds: doublePrecision("inactive_duration_seconds"),
+  },
+  (table) => [primaryKey({ columns: [table.id, table.capturedAt] })]
+);
+

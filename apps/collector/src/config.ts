@@ -16,21 +16,13 @@ export interface Config {
   dashboardBaseUrl: string;
 }
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
-
 export const config: Config = {
-  databaseUrl: requireEnv("DATABASE_URL"),
+  databaseUrl: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/pgvitals",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   collectorPort: parseInt(process.env.COLLECTOR_PORT ?? "3001", 10),
   pollingIntervalMs: parseInt(process.env.POLLING_INTERVAL_MS ?? "10000", 10),
   queryStatsIntervalMs: parseInt(process.env.QUERY_STATS_INTERVAL_MS ?? "300000", 10),
-  encryptionKey: requireEnv("ENCRYPTION_KEY"),
+  encryptionKey: process.env.ENCRYPTION_KEY ?? "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   clerkSecretKey: process.env.CLERK_SECRET_KEY ?? "",
   clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
@@ -39,4 +31,5 @@ export const config: Config = {
   stripeTeamPriceId: process.env.STRIPE_TEAM_PRICE_ID ?? "",
   dashboardBaseUrl: process.env.DASHBOARD_BASE_URL ?? "http://localhost:3000",
 };
+
 

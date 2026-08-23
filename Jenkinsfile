@@ -22,7 +22,7 @@ pipeline {
         // Clerk auth credentials ID (stores publishable key)
         CLERK_CREDENTIALS_ID = 'clerk-publishable-key'
         // Production server hostname
-        DEPLOY_HOST = 'pgva.japaneast.cloudapp.azure.com'
+        DEPLOY_HOST = 'pgva.eastasia.cloudapp.azure.com'
         DEPLOY_USER = 'pgvitals'
     }
 
@@ -69,17 +69,22 @@ pipeline {
                     pnpm install --frozen-lockfile || pnpm install --frozen-lockfile --ignore-scripts
                 '''
 
+                echo 'Building DB package...'
+                sh '''
+                    export PNPM_STORE_DIR=/tmp/.pnpm-store
+                    pnpm --filter @pgvitals/db build
+                '''
+
                 echo 'Running automated test suite...'
                 sh '''
                     export PNPM_STORE_DIR=/tmp/.pnpm-store
                     pnpm test
                 '''
 
-                echo 'Building DB, Collector, and Web applications...'
+                echo 'Building Collector and Web applications...'
                 withCredentials([string(credentialsId: env.CLERK_CREDENTIALS_ID, variable: 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY')]) {
                     sh '''
                         export PNPM_STORE_DIR=/tmp/.pnpm-store
-                        pnpm --filter @pgvitals/db build
                         pnpm --filter @pgvitals/collector build
                         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY pnpm --filter @pgvitals/web build
                     '''

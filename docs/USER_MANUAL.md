@@ -17,6 +17,7 @@ Welcome to the **PG Vitals User Manual**. This guide provides complete documenta
 9. [Tail Latencies (P95/P99) & Storage I/O Diagnostics](#9-tail-latencies-p95p99--storage-io-diagnostics)
 10. [Autovacuum Starvation & Worker Contention Sentinel](#10-autovacuum-starvation--worker-contention-sentinel)
 11. [Remote Remediation & Slack ChatOps](#11-remote-remediation--slack-chatops)
+12. [Production DBA Sentinel Suite](#12-production-dba-sentinel-suite)
 
 ---
 
@@ -66,6 +67,10 @@ Located at: `/databases/[id]`
   SELECT pg_terminate_backend(12345);
   ```
 
+### 2.4 Cascading Lock Queue Storm Sentinel
+- **Detection**: Automatically detects when a root blocker or DDL query holds exclusive table locks and blocks $\ge 2$ downstream transactions.
+- **Alerting**: Triggers `lock_queue_storm` high-priority notifications with root PID and queued query counts.
+
 ---
 
 ## 3. Query Performance & Optimization Engine
@@ -100,14 +105,26 @@ Located at: `/databases/[id]/indexes`
 ### 4.1 Default Table View & Search
 - Displays all index recommendations in a high-density **Table View** (toggleable to **Cards**).
 - Search by table name, column name, or index name.
-- Filter chips: `All`, `Unused Indexes`, `Missing Indexes`, `High Impact`.
+- Filter chips: `All`, `Unused Indexes`, `Missing Indexes`, `Invalid Indexes`, `Redundant Indexes`, `Bloated Indexes`.
 
 ### 4.2 Safe Zero-Downtime DDL
-- Every recommendation defaults to **`CREATE INDEX CONCURRENTLY`** and **`DROP INDEX CONCURRENTLY`** to prevent exclusive table locks during production hours.
+- Every recommendation defaults to **`CREATE INDEX CONCURRENTLY`**, **`DROP INDEX CONCURRENTLY`**, and **`REINDEX INDEX CONCURRENTLY`** to prevent exclusive table locks during production hours.
 
 ### 4.3 HypoPG Hypothetical Simulation
 - Test whether a recommended index will actually improve your query without creating physical indexes on disk.
 - Enter a test query and click **"Test in HypoPG"** to simulate planner cost before and after.
+
+### 4.4 Invalid Index Cleanup (`indisvalid = false`)
+- Scans `pg_index` for indexes left invalid or unready due to interrupted `CREATE INDEX CONCURRENTLY` commands.
+- Provides one-click `DROP INDEX CONCURRENTLY IF EXISTS` to clean up corrupted catalog definitions and stop wasted write overhead.
+
+### 4.5 Redundant / Prefix-Overlapping Index Detection
+- Evaluates column arrays (`indkey`) across all btree indexes per relation.
+- Flags non-unique indexes whose columns form a strict leading prefix of another multi-column index, eliminating duplicate index maintenance costs.
+
+### 4.6 B-Tree Index Bloat Estimator & REINDEX Advisor
+- Computes physical page count vs. theoretical live tuple packing density across B-Tree indexes.
+- Recommends `REINDEX INDEX CONCURRENTLY` for indexes exceeding 30% page bloat and wasting $> 10\text{ MB}$ of storage.
 
 ---
 
@@ -150,6 +167,21 @@ Located at: `/databases/[id]/health`
 - Tracks `age(datfrozenxid)` per table.
 - Warns when remaining transactions before emergency shutdown drop below 200,000,000 XIDs.
 
+### 6.3 HOT (Heap-Only Tuple) Update Efficiency & Parameter Tuning
+- Collects `n_tup_upd` vs. `n_tup_hot_upd` to measure whether updates modify indexed columns or find room on the same page.
+- Tables with $< 60\%$ HOT ratio receive actionable storage tuning suggestions:
+  ```sql
+  ALTER TABLE "public"."orders" SET (fillfactor = 85, autovacuum_vacuum_scale_factor = 0.05);
+  ```
+
+### 6.4 Checkpoint Write vs. Sync Time Telemetry
+- Inspects `pg_stat_bgwriter` for `checkpoint_write_time` vs. `checkpoint_sync_time`.
+- Flags disk I/O fsync stalls when checkpoint sync exceeds 30 seconds.
+
+### 6.5 WAL Generation Velocity & Archiving Health
+- Calculates real-time WAL generation rate in **MB/min** by tracking LSN offsets.
+- Monitors `pg_stat_archiver` and alerts immediately on failed WAL archive transfers (`failed_count > 0`).
+
 ---
 
 ## 7. Log Insights, Deadlocks & Replication
@@ -165,6 +197,15 @@ Located at: `/databases/[id]/logs` and `/databases/[id]/health` (Replication tab
 - Queries `pg_stat_replication` in real-time.
 - Calculates WAL byte lag via `pg_wal_lsn_diff(sent_lsn, replay_lsn)`.
 - Displays write lag, flush lag, and replay lag per replica.
+
+### 7.3 Replication Slot Sentinel & WAL Retention Risk
+- Monitors `pg_replication_slots` for inactive or orphaned physical and logical slots.
+- Calculates retained WAL bytes on the primary node.
+- Alerts on slots retaining $\ge 250\text{ MB}$ or in `unreserved` / `lost` state.
+- Provides one-click drop remediation commands:
+  ```sql
+  SELECT pg_drop_replication_slot('debezium_cdc');
+  ```
 
 ---
 
@@ -185,6 +226,11 @@ Located at: `/databases/[id]/alerts`
 - `deadlock_storm`: Deadlock count increase $> 0$.
 - `xid_wraparound_risk`: Table XID age $> 1.5$ billion.
 - `replication_lag`: Replay lag $> 60$ seconds or $> 100$MB.
+- `wal_retention_risk`: Replication slot retaining $\ge 1\text{ GB}$ of WAL or in `lost`/`unreserved` state.
+- `replication_slot_stalled`: Replication slot inactive while retaining WAL.
+- `invalid_indexes`: Database contains one or more `indisvalid = false` indexes.
+- `lock_queue_storm`: Root blocker session or DDL blocking $\ge 2$ downstream transactions.
+- `checkpoint_sync_stall`: Checkpoint fsync duration exceeding safety limits.
 
 ---
 
@@ -229,4 +275,21 @@ Located at: `/databases/[id]/health` (Autovacuum tab)
 - When a blocking chain exceeds the 30-second threshold, PG Vitals sends an interactive Block Kit card to Slack.
 - **Terminate Blocker Action**: Authorized team members can click **⚡ Terminate Blocker** with confirmation dialog.
 - Validates `X-Slack-Signature` HMAC tokens and updates the Slack alert card in real-time with the acting operator's handle.
+
+---
+
+## 12. Production DBA Sentinel Suite
+
+Summary of automated protections operating across polling cycles:
+
+| Sentinel Guard | Source View | Detection Metric | Remediation |
+| :--- | :--- | :--- | :--- |
+| **Replication Slot Sentinel** | `pg_replication_slots` | Inactive slot or $\ge 250\text{MB}$ WAL retention | `SELECT pg_drop_replication_slot('slot_name');` |
+| **Invalid Index Detector** | `pg_index` | `indisvalid = false` | `DROP INDEX CONCURRENTLY IF EXISTS "idx_name";` |
+| **Redundant Index Detector** | `pg_index` (`indkey`) | Leading column prefix overlap on same table | `DROP INDEX CONCURRENTLY IF EXISTS "idx_name";` |
+| **B-Tree Index Bloat Advisor** | `pg_class`, `pg_am`, `pg_stats` | Page bloat $> 30\%$ and bloat bytes $> 10\text{MB}$ | `REINDEX INDEX CONCURRENTLY "idx_name";` |
+| **Cascading Lock Queue Storm** | `pg_locks`, `pg_stat_activity` | Root blocker session blocking $\ge 2$ queries | `SELECT pg_terminate_backend(root_pid);` |
+| **HOT Update Tuner** | `pg_stat_user_tables` | `hot_update_ratio < 60%` on write-heavy tables | `ALTER TABLE ... SET (fillfactor = 85);` |
+| **Checkpoint Sync & WAL Velocity** | `pg_stat_bgwriter`, `pg_stat_archiver` | Sync time $> 30\text{s}$ or failed archive $> 0$ | Investigate fsync IOPS / storage archive path |
+
 

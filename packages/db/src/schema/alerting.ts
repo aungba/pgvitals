@@ -23,6 +23,11 @@ export const alertTypeEnum = pgEnum("alert_type", [
   "replication_lag",
   "monitoring_failure",
   "pool_exhaustion",
+  "wal_retention_risk",
+  "replication_slot_stalled",
+  "invalid_indexes",
+  "lock_queue_storm",
+  "checkpoint_sync_stall",
 ]);
 
 export const alertSeverityEnum = pgEnum("alert_severity", [

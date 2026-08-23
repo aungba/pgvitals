@@ -524,7 +524,7 @@ export interface IndexRecommendation {
   monitoredDbId: string;
   tableName: string;
   indexName: string | null;
-  recommendationType: "unused" | "missing";
+  recommendationType: "unused" | "missing" | "invalid" | "redundant" | "bloat";
   suggestedDdl: string | null;
   reason: string;
   impact: string;
@@ -604,6 +604,9 @@ export interface TableBloatStat {
   idxScan: number;
   cacheHitRatio: number | null;
   idxCacheHitRatio: number | null;
+  nHotUpd?: number | null;
+  nUpd?: number | null;
+  hotUpdateRatio?: number | null;
   capturedAt: string;
 }
 
@@ -613,6 +616,13 @@ export interface DbHealthSnapshot {
   cacheHitRatio: number | null;
   checkpointsRequested: number | null;
   checkpointsTimed: number | null;
+  checkpointWriteTime?: number | null;
+  checkpointSyncTime?: number | null;
+  walVelocityMbPerMin?: number | null;
+  archivedWalCount?: number | null;
+  failedWalCount?: number | null;
+  lastArchivedWal?: string | null;
+  lastFailedWal?: string | null;
   buffersCheckpoint: number | null;
   buffersBackend: number | null;
   dbSizeBytes: number | null;
@@ -758,6 +768,32 @@ export async function getReplicationHistory(
   const qs = params.toString();
   return request<{ history: ReplicationHistoryEntry[] }>(
     `/api/databases/${dbId}/replication/history${qs ? `?${qs}` : ""}`,
+    { token },
+  );
+}
+
+export interface ReplicationSlotSnapshot {
+  id: string;
+  capturedAt: string;
+  slotName: string;
+  plugin: string | null;
+  slotType: string;
+  active: boolean;
+  walStatus: string | null;
+  retainedBytes: number;
+  restartLsn: string | null;
+  confirmedFlushLsn: string | null;
+  temporary: boolean;
+  conflicting: boolean;
+  inactiveDurationSeconds: number | null;
+}
+
+export async function getReplicationSlots(
+  dbId: string,
+  token?: string,
+): Promise<{ slots: ReplicationSlotSnapshot[]; capturedAt: string | null }> {
+  return request<{ slots: ReplicationSlotSnapshot[]; capturedAt: string | null }>(
+    `/api/databases/${dbId}/replication/slots`,
     { token },
   );
 }

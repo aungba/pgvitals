@@ -10,6 +10,7 @@ import {
   getTableCacheHit,
   getDiskGrowth,
   getReplicationStats,
+  getReplicationSlots,
   getXidPerTable,
 } from "../../../lib/api";
 import type {
@@ -19,6 +20,7 @@ import type {
   TableCacheHit,
   TableSizeEntry,
   ReplicationSnapshot,
+  ReplicationSlotSnapshot,
   TableXidEntry,
 } from "../../../lib/api";
 import {
@@ -184,6 +186,8 @@ export default function HealthPage() {
   const [diskGrowthTables, setDiskGrowthTables] = useState<TableSizeEntry[]>([]);
   const [diskGrowthHistory, setDiskGrowthHistory] = useState<Array<{ tableName: string; totalSizeBytes: number; capturedAt: string }>>([]);
   const [replicas, setReplicas] = useState<ReplicationSnapshot[]>([]);
+  const [slots, setSlots] = useState<ReplicationSlotSnapshot[]>([]);
+  const [copiedSlotDrop, setCopiedSlotDrop] = useState<string | null>(null);
   const [tableXids, setTableXids] = useState<TableXidEntry[]>([]);
   const [xidFreezeMax, setXidFreezeMax] = useState<number>(200000000);
 
@@ -212,18 +216,20 @@ export default function HealthPage() {
       setTables(vacuumData.tables);
       setHealth(healthData.current);
       setHealthHistory(healthData.history);
-      // Fetch cache hit and disk growth data
+      // Fetch cache hit, disk growth, replication, and slot data
       try {
-        const [cacheData, growthData, replData, xidData] = await Promise.all([
+        const [cacheData, growthData, replData, slotData, xidData] = await Promise.all([
           getTableCacheHit(id),
           getDiskGrowth(id),
           getReplicationStats(id),
+          getReplicationSlots(id).catch(() => ({ slots: [] })),
           getXidPerTable(id).catch(() => ({ freezeMaxAge: 200000000, tables: [] })),
         ]);
         setCacheHitTables(cacheData.tables);
         setDiskGrowthTables(growthData.tables);
         setDiskGrowthHistory(growthData.history ?? []);
         setReplicas(replData.replicas);
+        setSlots(slotData.slots ?? []);
         setTableXids(xidData.tables);
         setXidFreezeMax(xidData.freezeMaxAge);
       } catch {
@@ -522,7 +528,19 @@ export default function HealthPage() {
                 icon="⚡" label="Checkpoints"
                 value={`${health.checkpointsTimed ?? 0} / ${health.checkpointsRequested ?? 0}`}
                 color={(health.checkpointsRequested ?? 0) > (health.checkpointsTimed ?? 0) ? "var(--signal-warning)" : "var(--signal-healthy)"}
-                hint="Timed / Requested"
+                hint={health.checkpointSyncTime != null ? `Sync: ${(health.checkpointSyncTime / 1000).toFixed(1)}s | Write: ${((health.checkpointWriteTime ?? 0) / 1000).toFixed(1)}s` : "Timed / Requested"}
+              />
+              <HealthGauge
+                icon="🌊" label="WAL Velocity"
+                value={health.walVelocityMbPerMin != null ? `${health.walVelocityMbPerMin.toFixed(1)} MB/m` : "—"}
+                color={(health.walVelocityMbPerMin ?? 0) > 50 ? "var(--signal-warning)" : "var(--brand)"}
+                hint="Rate of WAL generation"
+              />
+              <HealthGauge
+                icon="📦" label="WAL Archiving"
+                value={String(health.archivedWalCount ?? 0)}
+                color={(health.failedWalCount ?? 0) > 0 ? "var(--signal-critical)" : "var(--signal-healthy)"}
+                hint={(health.failedWalCount ?? 0) > 0 ? `⚠️ ${health.failedWalCount} failed archives` : "Archiver healthy"}
               />
               <HealthGauge
                 icon="☢️" label="XID Wraparound"
@@ -704,6 +722,7 @@ export default function HealthPage() {
                     <SortableHeader label="Dead %" sortKey="deadTupRatio" currentSort={bloatSort} onSort={toggleBloatSort} style={{ width: 90 }} />
                     <SortableHeader label="Dead Tuples" sortKey="nDeadTup" currentSort={bloatSort} onSort={toggleBloatSort} style={{ width: 100 }} />
                     <th className="alert-table-th" style={{ width: 90 }}>Live Tuples</th>
+                    <th className="alert-table-th" style={{ width: 80 }}>HOT %</th>
                     <SortableHeader label="Size" sortKey="totalSizeBytes" currentSort={bloatSort} onSort={toggleBloatSort} style={{ width: 80 }} />
                     <SortableHeader label="Last Vacuum" sortKey="lastVacuum" currentSort={bloatSort} onSort={toggleBloatSort} style={{ width: 100 }} />
                     <th className="alert-table-th" style={{ width: 60 }}>VACUUM #</th>
@@ -765,6 +784,13 @@ export default function HealthPage() {
                           <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-muted)" }}>
                             {formatNumber(t.nLiveTup)}
                           </td>
+                          <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}>
+                            {t.hotUpdateRatio != null ? (
+                              <span style={{ color: t.hotUpdateRatio >= 80 ? "var(--signal-healthy)" : t.hotUpdateRatio < 50 ? "var(--signal-warning)" : "var(--text-secondary)", fontWeight: 600 }}>
+                                {t.hotUpdateRatio.toFixed(0)}%
+                              </span>
+                            ) : "—"}
+                          </td>
                           <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-muted)" }}>
                             {formatBytes(t.totalSizeBytes)}
                           </td>
@@ -783,7 +809,7 @@ export default function HealthPage() {
                         {/* Expanded Detail Row */}
                         {isExpanded && (
                           <tr className="expanded-detail">
-                            <td colSpan={7}>
+                            <td colSpan={8}>
                               <div className="expanded-detail-inner">
                                 <div className="detail-item">
                                   <div className="detail-item-label">Schema</div>
@@ -811,6 +837,12 @@ export default function HealthPage() {
                                     color: (t.idxCacheHitRatio ?? 0) >= 99 ? "var(--signal-healthy)" : (t.idxCacheHitRatio ?? 0) >= 95 ? "var(--signal-warning)" : "var(--signal-critical)",
                                   }}>
                                     {t.idxCacheHitRatio != null ? `${t.idxCacheHitRatio.toFixed(1)}%` : "—"}
+                                  </div>
+                                </div>
+                                <div className="detail-item">
+                                  <div className="detail-item-label">HOT Updates / Total Updates</div>
+                                  <div className="detail-item-value">
+                                    {formatNumber(t.nHotUpd ?? 0)} / {formatNumber(t.nUpd ?? 0)} ({t.hotUpdateRatio?.toFixed(1) ?? 100}%)
                                   </div>
                                 </div>
                                 <div className="detail-item">
@@ -845,6 +877,23 @@ export default function HealthPage() {
                                   <div className="detail-item-label">Last Autoanalyze</div>
                                   <div className="detail-item-value">{timeAgo(t.lastAutoanalyze)}</div>
                                 </div>
+
+                                {t.hotUpdateRatio != null && t.hotUpdateRatio < 60 && (t.nUpd ?? 0) > 1000 && (
+                                  <div style={{
+                                    gridColumn: "1 / -1",
+                                    padding: "var(--space-sm) var(--space-md)",
+                                    background: "var(--surface-alt)",
+                                    borderLeft: "3px solid var(--signal-warning)",
+                                    borderRadius: "var(--radius-sm)",
+                                    fontSize: "0.8rem",
+                                    marginTop: "var(--space-xs)",
+                                  }}>
+                                    💡 <strong>Low HOT update efficiency ({t.hotUpdateRatio.toFixed(1)}%):</strong> Table updates are modifying indexed columns or running out of free page space, requiring new index entries. Consider setting a fillfactor and tuning autovacuum:
+                                    <div style={{ fontFamily: "var(--font-mono)", marginTop: 4, color: "var(--brand)" }}>
+                                      ALTER TABLE &quot;{t.schemaName}&quot;.&quot;{t.tableName}&quot; SET (fillfactor = 85, autovacuum_vacuum_scale_factor = 0.05);
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1059,97 +1108,213 @@ export default function HealthPage() {
          TAB: Replication
          ════════════════════════════════════════════════════════════ */}
       {activeTab === "replication" && (
-        <div className="animate-fade-in">
-          {replicas.length === 0 ? (
-            <div className="glass-card-static" style={{ padding: "var(--space-xl)", textAlign: "center", color: "var(--text-muted)" }}>
-              <div style={{ fontSize: "3rem", marginBottom: 8, opacity: 0.5 }}>🔄</div>
-              No replicas detected. This database does not appear to have any streaming replicas connected.
-            </div>
-          ) : (
-            <>
-              {replicas.some((r) => (r.timeLagSeconds ?? 0) > 30) && (
-                <div style={{
-                  padding: "var(--space-md) var(--space-lg)",
-                  marginBottom: "var(--space-md)",
-                  borderRadius: "var(--radius-md)",
-                  background: "var(--signal-critical-dim)",
-                  borderLeft: "3px solid var(--signal-critical)",
-                }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--signal-critical)" }}>
-                    ⚠️ High Replication Lag Detected
-                  </div>
-                  <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                    One or more replicas have significant replication lag. Reads from these replicas may return stale data.
-                    Possible causes: network latency, heavy read load on replica, or a long-running query blocking WAL replay.
-                  </div>
-                </div>
-              )}
-              <div className="glass-card-static" style={{ overflow: "hidden" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      <th className="alert-table-th">Replica</th>
-                      <th className="alert-table-th" style={{ width: 80 }}>State</th>
-                      <th className="alert-table-th" style={{ width: 100 }}>Byte Lag</th>
-                      <th className="alert-table-th" style={{ width: 100 }}>Time Lag</th>
-                      <th className="alert-table-th" style={{ width: 120 }}>Client</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {replicas.map((r) => {
-                      const stateColor = r.replicationState === "streaming" ? "var(--signal-healthy)" : "var(--signal-critical)";
-                      const lagColor = (r.timeLagSeconds ?? 0) > 30 ? "var(--signal-critical)"
-                        : (r.timeLagSeconds ?? 0) > 5 ? "var(--signal-warning)"
-                        : "var(--signal-healthy)";
-                      const byteLagStr = r.byteLag >= 1073741824 ? `${(r.byteLag / 1073741824).toFixed(1)} GB`
-                        : r.byteLag >= 1048576 ? `${(r.byteLag / 1048576).toFixed(1)} MB`
-                        : r.byteLag >= 1024 ? `${(r.byteLag / 1024).toFixed(1)} KB`
-                        : `${r.byteLag} B`;
-                      return (
-                        <tr key={r.id} className="alert-table-row">
-                          <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
-                            {r.replicaName}
-                          </td>
-                          <td className="alert-table-td">
-                            <span style={{
-                              display: "inline-flex", alignItems: "center", gap: 4,
-                              fontSize: "0.75rem", fontWeight: 600, color: stateColor,
-                              padding: "2px 8px", borderRadius: "var(--radius-full)",
-                              background: r.replicationState === "streaming" ? "var(--signal-healthy-dim)" : "var(--signal-critical-dim)",
-                            }}>
-                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: stateColor }} />
-                              {r.replicationState}
-                            </span>
-                          </td>
-                          <td className="alert-table-td" style={{
-                            fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600,
-                            color: lagColor,
-                          }}>
-                            {byteLagStr}
-                          </td>
-                          <td className="alert-table-td" style={{
-                            fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600,
-                            color: lagColor,
-                          }}>
-                            {r.timeLagSeconds != null ? (
-                              r.timeLagSeconds < 1 ? `${(r.timeLagSeconds * 1000).toFixed(0)}ms`
-                                : r.timeLagSeconds < 60 ? `${r.timeLagSeconds.toFixed(1)}s`
-                                : `${(r.timeLagSeconds / 60).toFixed(1)}m`
-                            ) : "—"}
-                          </td>
-                          <td className="alert-table-td" style={{
-                            fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-muted)",
-                          }}>
-                            {r.clientAddr ?? "—"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+        <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "var(--space-xl)" }}>
+          {/* Section 1: Streaming Replicas */}
+          <div>
+            <h3 style={{ fontSize: "1.05rem", fontWeight: 600, marginBottom: "var(--space-md)", color: "var(--text-primary)" }}>
+              📡 Streaming Replicas
+            </h3>
+            {replicas.length === 0 ? (
+              <div className="glass-card-static" style={{ padding: "var(--space-lg)", textAlign: "center", color: "var(--text-muted)" }}>
+                <div style={{ fontSize: "2rem", marginBottom: 6, opacity: 0.6 }}>🔄</div>
+                No streaming replicas connected to this database.
               </div>
-            </>
-          )}
+            ) : (
+              <>
+                {replicas.some((r) => (r.timeLagSeconds ?? 0) > 30) && (
+                  <div style={{
+                    padding: "var(--space-md) var(--space-lg)",
+                    marginBottom: "var(--space-md)",
+                    borderRadius: "var(--radius-md)",
+                    background: "var(--signal-critical-dim)",
+                    borderLeft: "3px solid var(--signal-critical)",
+                  }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--signal-critical)" }}>
+                      ⚠️ High Replication Lag Detected
+                    </div>
+                    <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                      One or more replicas have significant replication lag. Reads from these replicas may return stale data.
+                    </div>
+                  </div>
+                )}
+                <div className="glass-card-static" style={{ overflow: "hidden" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th className="alert-table-th">Replica</th>
+                        <th className="alert-table-th" style={{ width: 90 }}>State</th>
+                        <th className="alert-table-th" style={{ width: 110 }}>Byte Lag</th>
+                        <th className="alert-table-th" style={{ width: 110 }}>Time Lag</th>
+                        <th className="alert-table-th" style={{ width: 130 }}>Client</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {replicas.map((r) => {
+                        const stateColor = r.replicationState === "streaming" ? "var(--signal-healthy)" : "var(--signal-critical)";
+                        const lagColor = (r.timeLagSeconds ?? 0) > 30 ? "var(--signal-critical)"
+                          : (r.timeLagSeconds ?? 0) > 5 ? "var(--signal-warning)"
+                          : "var(--signal-healthy)";
+                        const byteLagStr = formatBytes(r.byteLag);
+                        return (
+                          <tr key={r.id} className="alert-table-row">
+                            <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
+                              {r.replicaName}
+                            </td>
+                            <td className="alert-table-td">
+                              <span style={{
+                                display: "inline-flex", alignItems: "center", gap: 4,
+                                fontSize: "0.75rem", fontWeight: 600, color: stateColor,
+                                padding: "2px 8px", borderRadius: "var(--radius-full)",
+                                background: r.replicationState === "streaming" ? "var(--signal-healthy-dim)" : "var(--signal-critical-dim)",
+                              }}>
+                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: stateColor }} />
+                                {r.replicationState}
+                              </span>
+                            </td>
+                            <td className="alert-table-td" style={{
+                              fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600,
+                              color: lagColor,
+                            }}>
+                              {byteLagStr}
+                            </td>
+                            <td className="alert-table-td" style={{
+                              fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600,
+                              color: lagColor,
+                            }}>
+                              {r.timeLagSeconds != null ? (
+                                r.timeLagSeconds < 1 ? `${(r.timeLagSeconds * 1000).toFixed(0)}ms`
+                                  : r.timeLagSeconds < 60 ? `${r.timeLagSeconds.toFixed(1)}s`
+                                  : `${(r.timeLagSeconds / 60).toFixed(1)}m`
+                              ) : "—"}
+                            </td>
+                            <td className="alert-table-td" style={{
+                              fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-muted)",
+                            }}>
+                              {r.clientAddr ?? "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Section 2: Replication Slots & WAL Retention Risk */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-md)" }}>
+              <h3 style={{ fontSize: "1.05rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                🛡️ Replication Slots & WAL Retention Sentinel
+              </h3>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                Guards against unmanaged WAL file accumulation on primary
+              </span>
+            </div>
+
+            {slots.length === 0 ? (
+              <div className="glass-card-static" style={{ padding: "var(--space-lg)", textAlign: "center", color: "var(--text-muted)" }}>
+                No replication slots found on this instance.
+              </div>
+            ) : (
+              <>
+                {slots.some((s) => s.retainedBytes > 250 * 1024 * 1024 || !s.active) && (
+                  <div style={{
+                    padding: "var(--space-md) var(--space-lg)",
+                    marginBottom: "var(--space-md)",
+                    borderRadius: "var(--radius-md)",
+                    background: "var(--signal-warning-dim)",
+                    borderLeft: "3px solid var(--signal-warning)",
+                  }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--signal-warning)" }}>
+                      ⚠️ Inactive / WAL-Retaining Slot Detected
+                    </div>
+                    <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                      Inactive replication slots hold WAL files on the primary database, preventing checkpoint cleanup.
+                      If the consumer is dead or orphaned, drop the slot to reclaim disk space.
+                    </div>
+                  </div>
+                )}
+                <div className="glass-card-static" style={{ overflow: "hidden" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th className="alert-table-th">Slot Name</th>
+                        <th className="alert-table-th" style={{ width: 100 }}>Type</th>
+                        <th className="alert-table-th" style={{ width: 90 }}>Status</th>
+                        <th className="alert-table-th" style={{ width: 110 }}>WAL Status</th>
+                        <th className="alert-table-th" style={{ width: 130 }}>Retained WAL</th>
+                        <th className="alert-table-th" style={{ width: 150 }}>Restart LSN</th>
+                        <th className="alert-table-th" style={{ width: 140, textAlign: "right" }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {slots.map((s) => {
+                        const isBloated = s.retainedBytes > 1000 * 1024 * 1024;
+                        const isWarning = s.retainedBytes > 250 * 1024 * 1024;
+                        const walColor = isBloated ? "var(--signal-critical)" : isWarning ? "var(--signal-warning)" : "var(--signal-healthy)";
+                        const dropCmd = `SELECT pg_drop_replication_slot('${s.slotName}');`;
+                        const isCopied = copiedSlotDrop === s.slotName;
+
+                        return (
+                          <tr key={s.id} className="alert-table-row">
+                            <td className="alert-table-td" style={{ fontFamily: "var(--font-mono)", fontSize: "0.85rem", fontWeight: 600 }}>
+                              {s.slotName}
+                            </td>
+                            <td className="alert-table-td" style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                              {s.slotType} {s.plugin ? `(${s.plugin})` : ""}
+                            </td>
+                            <td className="alert-table-td">
+                              <span style={{
+                                display: "inline-flex", alignItems: "center", gap: 4,
+                                fontSize: "0.75rem", fontWeight: 600,
+                                color: s.active ? "var(--signal-healthy)" : "var(--signal-critical)",
+                                padding: "2px 8px", borderRadius: "var(--radius-full)",
+                                background: s.active ? "var(--signal-healthy-dim)" : "var(--signal-critical-dim)",
+                              }}>
+                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: s.active ? "var(--signal-healthy)" : "var(--signal-critical)" }} />
+                                {s.active ? "Active" : "Inactive"}
+                              </span>
+                            </td>
+                            <td className="alert-table-td" style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                              {s.walStatus ?? "normal"}
+                            </td>
+                            <td className="alert-table-td" style={{
+                              fontFamily: "var(--font-mono)", fontSize: "0.85rem", fontWeight: 700,
+                              color: walColor,
+                            }}>
+                              {formatBytes(s.retainedBytes)}
+                            </td>
+                            <td className="alert-table-td" style={{
+                              fontFamily: "var(--font-mono)", fontSize: "0.75rem", color: "var(--text-muted)",
+                            }}>
+                              {s.restartLsn ?? "—"}
+                            </td>
+                            <td className="alert-table-td" style={{ textAlign: "right" }}>
+                              <button
+                                className="copy-btn"
+                                data-copied={isCopied}
+                                onClick={() => {
+                                  navigator.clipboard.writeText(dropCmd);
+                                  setCopiedSlotDrop(s.slotName);
+                                  setTimeout(() => setCopiedSlotDrop(null), 2000);
+                                }}
+                                title={dropCmd}
+                                style={{ fontSize: "0.75rem" }}
+                              >
+                                {isCopied ? "✓ Copied" : "📋 Drop Slot"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

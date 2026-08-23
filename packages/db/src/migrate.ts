@@ -107,6 +107,26 @@ async function runMigrations() {
     console.log("  ⏭️  table_size_history hypertable already exists");
   }
 
+  // Convert replication_slot_snapshots to hypertable
+  const slotHypertable = await sql`
+    SELECT * FROM timescaledb_information.hypertables 
+    WHERE hypertable_name = 'replication_slot_snapshots'
+  `;
+  if (slotHypertable.length === 0) {
+    const tableExists = await sql`
+      SELECT 1 FROM information_schema.tables 
+      WHERE table_name = 'replication_slot_snapshots'
+    `;
+    if (tableExists.length > 0) {
+      await sql`SELECT create_hypertable('replication_slot_snapshots', by_range('captured_at'))`;
+      console.log("  ✅ replication_slot_snapshots hypertable created");
+    } else {
+      console.log("  ⏭️  replication_slot_snapshots table not yet created");
+    }
+  } else {
+    console.log("  ⏭️  replication_slot_snapshots hypertable already exists");
+  }
+
   console.log("✅ TimescaleDB setup complete.");
 
   await sql.end();
