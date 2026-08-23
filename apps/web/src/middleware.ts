@@ -1,17 +1,28 @@
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextFetchEvent } from "next/server";
 
 const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
-export default async function middleware(request: NextRequest) {
+const isPublicRoute = createRouteMatcher([
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+]);
+
+const protectedMiddleware = clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
+    await auth.protect();
+  }
+});
+
+export default function middleware(request: NextRequest, event: NextFetchEvent) {
   // Dev mode — no auth, let everything through
   if (!clerkEnabled) {
     return NextResponse.next();
   }
 
-  // Production mode — use standard Clerk middleware
-  const { clerkMiddleware } = await import("@clerk/nextjs/server");
-  return clerkMiddleware()(request, {} as any);
+  // Production mode — enforce login for protected routes
+  return protectedMiddleware(request, event);
 }
 
 export const config = {
@@ -22,3 +33,4 @@ export const config = {
     "/(api|trpc)(.*)",
   ],
 };
+

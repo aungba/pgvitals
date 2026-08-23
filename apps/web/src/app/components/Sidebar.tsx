@@ -2,7 +2,18 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { UserButton, useAuth } from "@clerk/nextjs";
 import ThemeToggle from "./ThemeToggle";
+
+const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+function ClerkUserSection() {
+  const { isSignedIn } = useAuth();
+  if (!isSignedIn) return null;
+  return <UserButton />;
+}
+
+
 
 /* ===================================================================
    Sidebar — Collapsible navigation sidebar
@@ -179,7 +190,10 @@ export default function Sidebar() {
 
         {/* Footer */}
         <div className="sidebar-footer">
-          <span className="sidebar-footer-version">PG Vitals v0.1.0</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {clerkEnabled && <ClerkUserSection />}
+            <span className="sidebar-footer-version">PG Vitals v0.1.0</span>
+          </div>
           <ThemeToggle />
         </div>
       </aside>
