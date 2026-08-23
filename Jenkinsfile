@@ -35,8 +35,12 @@ pipeline {
         stage('Checkout GitHub Repository') {
             agent any
             steps {
-                // Wipe workspace completely as root to clear corrupted .git or root-owned files from previous builds
-                sh 'docker run --rm -v "$WORKSPACE:/ws" alpine sh -c "chmod -R 777 /ws 2>/dev/null || true; rm -rf /ws/* /ws/.[!.]* /ws/..?* 2>/dev/null || true"'
+                // Wipe workspace and configure git safe.directory to prevent ownership mismatch errors
+                sh '''
+                    docker run --rm -v "$WORKSPACE:/ws" alpine sh -c "chmod -R 777 /ws 2>/dev/null || true; rm -rf /ws/* /ws/.[!.]* /ws/..?* 2>/dev/null || true"
+                    git config --global --add safe.directory "$WORKSPACE" || true
+                    git config --global --add safe.directory '*' || true
+                '''
 
                 echo "Checking out branch '${params.BRANCH_NAME}' from GitHub..."
                 checkout([
