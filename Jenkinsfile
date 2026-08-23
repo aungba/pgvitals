@@ -35,8 +35,8 @@ pipeline {
         stage('Checkout GitHub Repository') {
             agent any
             steps {
-                // Clean ALL root-owned files from previous Docker builds (jenkins user can't overwrite them)
-                sh 'docker run --rm -v "$WORKSPACE:/ws" alpine sh -c "find /ws -user root -exec rm -rf {} + 2>/dev/null; true"'
+                // Fix permissions and clean leftover files from previous Docker builds
+                sh 'docker run --rm -v "$WORKSPACE:/ws" alpine sh -c "chmod -R 777 /ws 2>/dev/null || true; find /ws -user root -exec rm -rf {} + 2>/dev/null; true"'
 
                 echo "Checking out branch '${params.BRANCH_NAME}' from GitHub..."
                 checkout([
@@ -90,8 +90,8 @@ pipeline {
                     '''
                 }
 
-                // Fix file ownership: Docker runs as root, but Jenkins agent needs to read/write these files
-                sh 'chown -R 110:114 . || true'
+                // Fix file permissions: ensure host Jenkins agent (regardless of UID/GID) has full access
+                sh 'chmod -R 777 . || true'
 
                 stash includes: '**', excludes: 'node_modules/**,.git/**,.pnpm-store/**', name: 'build'
             }
