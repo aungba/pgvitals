@@ -57,6 +57,7 @@ export function getLimits(planTier: string): PlanLimits {
   return PLAN_LIMITS[planTier] ?? PLAN_LIMITS.free;
 }
 
+
 /**
  * Fastify preHandler that checks if the user can add more databases.
  */

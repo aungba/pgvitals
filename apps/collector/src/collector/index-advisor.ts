@@ -177,7 +177,7 @@ JOIN index_data b
   AND a.index_columns <@ b.index_columns
   AND a.index_columns[1] = b.index_columns[1]
   AND array_length(a.index_columns, 1) < array_length(b.index_columns, 1)
-ORDER BY a.redundant_index_size::bigint DESC
+ORDER BY a.index_size::bigint DESC
 LIMIT 30
 `;
 

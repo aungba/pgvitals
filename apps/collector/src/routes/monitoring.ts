@@ -291,32 +291,56 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
   );
 
   /**
-   * GET /api/databases/:id/hints — Active root-cause hints (last 24h).
+   * GET /api/databases/:id/hints — Active or historical root-cause hints.
    */
-  app.get<{ Params: { id: string } }>(
+  app.get<{
+    Params: { id: string };
+    Querystring: {
+      hours?: string;
+      severity?: string;
+      ruleType?: string;
+      limit?: string;
+      offset?: string;
+    };
+  }>(
     "/api/databases/:id/hints",
     { preHandler: [authMiddleware] },
     async (request, reply) => {
       try {
         const { id } = request.params;
+        const { hours, severity, ruleType, limit, offset } = request.query;
 
         // Verify database belongs to this org
         if (!await verifyDbOwnership(id, request.auth.orgId)) {
           return reply.status(404).send({ error: "Database not found" });
         }
 
-        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const conditions = [eq(rootCauseHints.monitoredDbId, id)];
+
+        const parsedHours = hours !== undefined ? parseFloat(hours) : 24;
+        if (parsedHours > 0) {
+          const fromTime = new Date(Date.now() - parsedHours * 60 * 60 * 1000);
+          conditions.push(gte(rootCauseHints.detectedAt, fromTime));
+        }
+
+        if (severity && severity !== "all") {
+          conditions.push(eq(rootCauseHints.severity, severity));
+        }
+
+        if (ruleType && ruleType !== "all") {
+          conditions.push(eq(rootCauseHints.ruleType, ruleType));
+        }
+
+        const parsedLimit = limit ? Math.min(Math.max(1, parseInt(limit, 10)), 500) : 200;
+        const parsedOffset = offset ? Math.max(0, parseInt(offset, 10)) : 0;
 
         const hints = await db
           .select()
           .from(rootCauseHints)
-          .where(
-            and(
-              eq(rootCauseHints.monitoredDbId, id),
-              gte(rootCauseHints.detectedAt, twentyFourHoursAgo)
-            )
-          )
-          .orderBy(desc(rootCauseHints.detectedAt));
+          .where(and(...conditions))
+          .orderBy(desc(rootCauseHints.detectedAt))
+          .limit(parsedLimit)
+          .offset(parsedOffset);
 
         return reply.send({
           hints: hints.map((h) => ({

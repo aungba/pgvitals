@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
-import Sidebar from "./components/Sidebar";
+import AppShell from "./components/AppShell";
 import AuthTokenProvider from "./components/AuthTokenProvider";
 
 export const metadata: Metadata = {
-  title: "PG Vitals — PostgreSQL Monitoring",
+  title: "PG Vitals — PostgreSQL Monitoring & Diagnostics",
   description:
-    "Real-time PostgreSQL connection monitoring, session analysis, and root-cause diagnostics.",
+    "Real-time PostgreSQL connection monitoring, session analysis, index & vacuum advisors, and root-cause diagnostics.",
 };
 
 export default function RootLayout({
@@ -38,10 +38,7 @@ export default function RootLayout({
         </head>
         <body>
           <AuthTokenProvider>
-            <div className="app-layout">
-              <Sidebar />
-              <main className="main-content">{children}</main>
-            </div>
+            <AppShell>{children}</AppShell>
           </AuthTokenProvider>
         </body>
       </html>

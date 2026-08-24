@@ -4,9 +4,13 @@ import React, { useEffect, useState, useCallback } from "react";
 import { getDatabases, getOverview, getActiveAlerts } from "./lib/api";
 import type { Database, OverviewResponse, Alert } from "./lib/api";
 import { useApiToken } from "./lib/useApiToken";
+import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import ConnectionGauge from "./components/ConnectionGauge";
 import StatusBadge from "./components/StatusBadge";
+import LandingPage from "./components/LandingPage";
+
+const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 /* ===================================================================
    Dashboard Home — Lists all monitored databases with utilization
@@ -19,6 +23,7 @@ interface DbWithOverview {
 }
 
 export default function DashboardPage() {
+  const { isSignedIn, isLoaded } = useAuth();
   const [items, setItems] = useState<DbWithOverview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +92,10 @@ export default function DashboardPage() {
       setSortKey(key);
       setSortDir("asc");
     }
+  }
+
+  if (clerkEnabled && isLoaded && !isSignedIn) {
+    return <LandingPage />;
   }
 
   if (loading) {

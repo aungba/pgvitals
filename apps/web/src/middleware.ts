@@ -5,6 +5,8 @@ import type { NextRequest, NextFetchEvent } from "next/server";
 const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 const isPublicRoute = createRouteMatcher([
+  "/",
+  "/landing",
   "/sign-in(.*)",
   "/sign-up(.*)",
 ]);

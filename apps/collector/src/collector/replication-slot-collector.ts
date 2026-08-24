@@ -36,7 +36,7 @@ SELECT
   plugin,
   slot_type,
   active,
-  wal_status,
+  (to_jsonb(r)->>'wal_status') AS wal_status,
   COALESCE(
     pg_wal_lsn_diff(
       CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END,
@@ -46,9 +46,9 @@ SELECT
   )::text AS retained_bytes,
   restart_lsn::text,
   confirmed_flush_lsn::text,
-  temporary,
-  conflicting
-FROM pg_replication_slots
+  (to_jsonb(r)->>'temporary')::boolean AS temporary,
+  (to_jsonb(r)->>'conflicting')::boolean AS conflicting
+FROM pg_replication_slots r
 ORDER BY retained_bytes DESC
 `;
 

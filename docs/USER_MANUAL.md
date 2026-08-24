@@ -18,6 +18,7 @@ Welcome to the **PG Vitals User Manual**. This guide provides complete documenta
 10. [Autovacuum Starvation & Worker Contention Sentinel](#10-autovacuum-starvation--worker-contention-sentinel)
 11. [Remote Remediation & Slack ChatOps](#11-remote-remediation--slack-chatops)
 12. [Production DBA Sentinel Suite](#12-production-dba-sentinel-suite)
+13. [Root Cause Hints & Incident Audit Logs](#13-root-cause-hints--incident-audit-logs)
 
 ---
 
@@ -291,5 +292,35 @@ Summary of automated protections operating across polling cycles:
 | **Cascading Lock Queue Storm** | `pg_locks`, `pg_stat_activity` | Root blocker session blocking $\ge 2$ queries | `SELECT pg_terminate_backend(root_pid);` |
 | **HOT Update Tuner** | `pg_stat_user_tables` | `hot_update_ratio < 60%` on write-heavy tables | `ALTER TABLE ... SET (fillfactor = 85);` |
 | **Checkpoint Sync & WAL Velocity** | `pg_stat_bgwriter`, `pg_stat_archiver` | Sync time $> 30\text{s}$ or failed archive $> 0$ | Investigate fsync IOPS / storage archive path |
+
+---
+
+## 13. Root Cause Hints & Incident Audit Logs
+
+Located at: `/databases/[id]/hints` (with live preview widget on `/databases/[id]`)
+
+### 13.1 Automated Root Cause Detection Rules
+PG Vitals continuously evaluates 7 heuristic diagnostic rules during every collection cycle:
+- **Idle in Transaction (`idle_in_transaction_long`)**: Surfaces sessions holding idle transactions $> 300\text{s}$.
+- **Connection Hog (`connection_hog`)**: Detects a single client application consuming $> 70\%$ of available connections.
+- **Blocking Lock Chain (`blocking_chain_long`)**: Pinpoints active transactions waiting on locks $> 30\text{s}$ with blocker PID and query.
+- **Connection Exhaustion (`connection_exhaustion`)**: Flags when total connections surpass $80\%$ of `max_connections`.
+- **Connection Spike (`connection_spike`)**: Alerts on sudden surges ($> 50\%$ spike from prior snapshot).
+- **Lock Contention Storm (`micro_query_lock_storm`)**: Identifies high-frequency concurrency storms on hot table rows.
+- **Lock Queue Storm (`lock_queue_storm`)**: Alerts on cascading lock queues ($\ge 2$ sessions queued behind a root blocker).
+
+### 13.2 Dashboard Widget & Live Incident Feed
+- Displays the most recent active hints next to the Connection Utilization gauge.
+- Includes a direct link `View Full Logs & History →` to jump straight to historical logs.
+
+### 13.3 Historical Audit Log & Inspector
+- **Timeframe Selector**: Filter incident history across `1h`, `24h`, `7d`, `30d`, or `All Time`.
+- **Multi-Filter & Search**: Filter by Severity (`Critical` / `Warning`), Rule Type, or search by PID, application name, or SQL snippet.
+- **Incident Inspector Drawer**: Click any incident row to inspect:
+  - Full anomaly description and exact timestamp.
+  - Culprit SQL query formatted with a 1-click **📋 Copy SQL** button.
+  - Diagnostic session metadata (PID, application name, duration, waiting session count).
+  - Specific remediation guidance and recommended PostgreSQL parameter tuning.
+- **Exporting Incident Logs**: Export filtered incident records to **CSV** or **JSON** for post-mortem reporting.
 
 

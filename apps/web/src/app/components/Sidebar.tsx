@@ -93,6 +93,21 @@ function SidebarLink({
         <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
         <path d="M16 3.13a4 4 0 0 1 0 7.75" />
       </svg>
+    ) : icon === "landing" ? (
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
     ) : (
       <svg
         width="18"
@@ -186,6 +201,7 @@ export default function Sidebar() {
           <SidebarLink href="/databases/new" icon="add" label="Add Database" collapsed={collapsed} />
           <SidebarLink href="/settings/billing" icon="settings" label="Billing" collapsed={collapsed} />
           <SidebarLink href="/settings/team" icon="team" label="Team" collapsed={collapsed} />
+          <SidebarLink href="/landing" icon="landing" label="Public Site" collapsed={collapsed} />
         </nav>
 
         {/* Footer */}

@@ -251,8 +251,29 @@ export async function getSnapshots(
   return data.snapshots;
 }
 
-export async function getHints(id: string, token?: string): Promise<Hint[]> {
-  const data = await request<HintsResponse>(`/api/databases/${id}/hints`, { token });
+export interface GetHintsOptions {
+  hours?: number;
+  severity?: string;
+  ruleType?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function getHints(
+  id: string,
+  options?: GetHintsOptions,
+  token?: string
+): Promise<Hint[]> {
+  const params = new URLSearchParams();
+  if (options?.hours !== undefined) params.set("hours", options.hours.toString());
+  if (options?.severity && options.severity !== "all") params.set("severity", options.severity);
+  if (options?.ruleType && options.ruleType !== "all") params.set("ruleType", options.ruleType);
+  if (options?.limit) params.set("limit", options.limit.toString());
+  if (options?.offset) params.set("offset", options.offset.toString());
+
+  const qs = params.toString();
+  const url = `/api/databases/${id}/hints${qs ? `?${qs}` : ""}`;
+  const data = await request<HintsResponse>(url, { token });
   return data.hints;
 }
 

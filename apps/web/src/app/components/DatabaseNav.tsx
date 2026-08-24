@@ -11,6 +11,7 @@ import { useParams, usePathname } from "next/navigation";
 
 const tabs = [
   { label: "Overview", segment: "", icon: "📊" },
+  { label: "Hints", segment: "/hints", icon: "💡" },
   { label: "Queries", segment: "/queries", icon: "🔍" },
   { label: "Indexes", segment: "/indexes", icon: "📇" },
   { label: "Health", segment: "/health", icon: "💚" },

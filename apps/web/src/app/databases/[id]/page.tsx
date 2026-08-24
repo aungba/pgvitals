@@ -75,6 +75,7 @@ export default function DatabaseDetailPage() {
   const [selectedHistoricalTimestamp, setSelectedHistoricalTimestamp] = useState<string | null>(null);
   const [replaySnapshotTimestamp, setReplaySnapshotTimestamp] = useState<string | null>(null);
   const [replayLoading, setReplayLoading] = useState(false);
+  const [copiedBlockerPid, setCopiedBlockerPid] = useState<number | null>(null);
 
   const handleDelete = useCallback(async () => {
     if (!database) return;
@@ -383,7 +384,7 @@ export default function DatabaseDetailPage() {
               Active Blocking Lock Chain Detected ({rootBlockers.length} root blocker{rootBlockers.length !== 1 ? "s" : ""})
             </div>
             {rootBlockers.map(({ session, blockedPids }) => (
-              <div key={session.pid} style={{ marginTop: 6 }}>
+              <div key={session.pid} style={{ marginTop: 8 }}>
                 <div className="blocker-alert-desc">
                   <strong>PID {session.pid}</strong> ({session.usename || "unknown user"}, {session.applicationName || "unnamed app"}) is in state{" "}
                   <code style={{ background: "var(--surface)", padding: "1px 4px", borderRadius: 3, fontFamily: "var(--font-mono)" }}>
@@ -392,6 +393,28 @@ export default function DatabaseDetailPage() {
                   for {Math.round(session.stateDurationSeconds)}s and is holding locks blocking{" "}
                   <strong>{blockedPids.length} session{blockedPids.length !== 1 ? "s" : ""}</strong>.
                 </div>
+                {session.queryText && (
+                  <div className="blocker-alert-query-section">
+                    <div className="blocker-alert-query-header">
+                      <span className="blocker-alert-query-label">Root Blocker Query:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(session.queryText);
+                          setCopiedBlockerPid(session.pid);
+                          setTimeout(() => setCopiedBlockerPid(null), 2000);
+                        }}
+                        className="btn-secondary blocker-alert-copy-btn"
+                        title="Copy query to clipboard"
+                      >
+                        {copiedBlockerPid === session.pid ? "✓ Copied" : "Copy Query"}
+                      </button>
+                    </div>
+                    <pre className="blocker-alert-query-box">
+                      <code>{session.queryText}</code>
+                    </pre>
+                  </div>
+                )}
                 <div className="blocker-alert-pids">
                   <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", alignSelf: "center" }}>Blocked PIDs:</span>
                   {blockedPids.map((bPid) => (
@@ -535,25 +558,42 @@ export default function DatabaseDetailPage() {
 
         {/* Hints */}
         <div>
-          <div className="section-title">
-            Root Cause Hints{" "}
-            {sortedHints.length > 0 && (
-              <span
-                style={{
-                  background: "var(--brand-dim)",
-                  color: "var(--brand)",
-                  padding: "1px 8px",
-                  borderRadius: "9999px",
-                  fontSize: "0.7rem",
-                  fontWeight: 600,
-                  marginLeft: 8,
-                  textTransform: "none",
-                  letterSpacing: 0,
-                }}
-              >
-                {sortedHints.length}
-              </span>
-            )}
+          <div className="section-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center" }}>
+              Root Cause Hints{" "}
+              {sortedHints.length > 0 && (
+                <span
+                  style={{
+                    background: "var(--brand-dim)",
+                    color: "var(--brand)",
+                    padding: "1px 8px",
+                    borderRadius: "9999px",
+                    fontSize: "0.7rem",
+                    fontWeight: 600,
+                    marginLeft: 8,
+                    textTransform: "none",
+                    letterSpacing: 0,
+                  }}
+                >
+                  {sortedHints.length}
+                </span>
+              )}
+            </div>
+            <Link
+              href={`/databases/${id}/hints`}
+              style={{
+                fontSize: "0.8rem",
+                color: "var(--brand)",
+                textDecoration: "none",
+                fontWeight: 500,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                transition: "opacity var(--transition-fast)",
+              }}
+            >
+              View Full Logs & History →
+            </Link>
           </div>
           {sortedHints.length > 0 ? (
             <div
@@ -565,9 +605,23 @@ export default function DatabaseDetailPage() {
                 overflowY: "auto",
               }}
             >
-              {sortedHints.map((hint, i) => (
+              {sortedHints.slice(0, 5).map((hint, i) => (
                 <HintCard key={hint.id} hint={hint} index={i} />
               ))}
+              {sortedHints.length > 5 && (
+                <div style={{ textAlign: "center", paddingTop: "var(--space-xs)" }}>
+                  <Link
+                    href={`/databases/${id}/hints`}
+                    style={{
+                      fontSize: "0.78rem",
+                      color: "var(--text-muted)",
+                      textDecoration: "none",
+                    }}
+                  >
+                    + {sortedHints.length - 5} more hints in full log →
+                  </Link>
+                </div>
+              )}
             </div>
           ) : (
             <div
@@ -585,6 +639,17 @@ export default function DatabaseDetailPage() {
             >
               <div style={{ fontSize: "2rem", marginBottom: 8, opacity: 0.5 }}>✅</div>
               <div style={{ fontSize: "0.9rem" }}>No issues detected — everything looks healthy</div>
+              <Link
+                href={`/databases/${id}/hints`}
+                style={{
+                  marginTop: "var(--space-sm)",
+                  fontSize: "0.75rem",
+                  color: "var(--brand)",
+                  textDecoration: "none",
+                }}
+              >
+                Browse past incident logs →
+              </Link>
             </div>
           )}
         </div>

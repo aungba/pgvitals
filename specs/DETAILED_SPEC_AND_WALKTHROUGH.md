@@ -825,6 +825,7 @@ Detects DDL changes (CREATE/DROP table/column/index) via periodic schema diffing
 | `/` | `page.tsx` | Dashboard home — grid of monitored databases with connection gauges |
 | `/databases/new` | `databases/new/page.tsx` | Form to register a new database (name, connection string, environment) |
 | `/databases/[id]` | `databases/[id]/page.tsx` | Database detail — overview stats, feature subnav, root blocker alert banner, auto-refresh controller, point-in-time session replay ("Time-Travel") mode with Prev/Next step scrubber, connection chart with click-to-replay & timeframe toggles (15m, 1h, 6h, 24h, 7d, ALL), searchable sessions table with state filters |
+| `/databases/[id]/hints` | `databases/[id]/hints/page.tsx` | Root Cause Hints & Incident Logs — chronological log of heuristic rules engine detections, lock contention storms, KPI metrics, search, time range filtering, deep diagnostic inspector drawer with culprit SQL copy, and CSV/JSON export |
 | `/databases/[id]/alerts` | `databases/[id]/alerts/page.tsx` | Alert rules + history + feedback (thumbs up/down) + multi-channel config (Slack, Email, PagerDuty, Teams, Webhook) |
 | `/databases/[id]/queries` | `databases/[id]/queries/page.tsx` | Query performance — workload KPI strip, search & filter chips, sortable table with inline workload heat bars, statement detail drawer with SQL syntax formatting, copy button, dual-metric latency/volume trend charts, on-demand EXPLAIN & HypoPG simulation bridge |
 | `/databases/[id]/indexes` | `databases/[id]/indexes/page.tsx` | Index advisor — default table view (toggleable to cards), reclaimable disk space & seq scan summary, search, sort, filter chips, CONCURRENTLY safe DDL, expandable indexdef, HypoPG simulation |
@@ -911,7 +912,7 @@ Type-safe fetch wrapper with:
 | `GET` | `/api/databases/:id/overview` | Latest snapshot + utilization % |
 | `GET` | `/api/databases/:id/sessions` | Latest or historical session details (`?timestamp=` or `?snapshotId=`) |
 | `GET` | `/api/databases/:id/snapshots` | Time-series snapshots (`?from=&to=&limit=`) |
-| `GET` | `/api/databases/:id/hints` | Active root-cause hints (last 24h) |
+| `GET` | `/api/databases/:id/hints` | Active or historical root-cause hints (`?hours=&severity=&ruleType=&limit=&offset=`) |
 
 ### Alerts
 
