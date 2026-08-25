@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import AppShell from "./components/AppShell";
 import AuthTokenProvider from "./components/AuthTokenProvider";
+import QueryProvider from "./components/QueryProvider";
 
 export const metadata: Metadata = {
   title: "PG Vitals — PostgreSQL Monitoring & Diagnostics",
@@ -38,7 +39,9 @@ export default function RootLayout({
         </head>
         <body>
           <AuthTokenProvider>
-            <AppShell>{children}</AppShell>
+            <QueryProvider>
+              <AppShell>{children}</AppShell>
+            </QueryProvider>
           </AuthTokenProvider>
         </body>
       </html>

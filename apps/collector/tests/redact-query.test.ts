@@ -125,5 +125,21 @@ describe("redactQueryLiterals", () => {
       expect(result).toContain("$1");
       expect(result).toContain("$2");
     });
+
+    it("should redact embedded JSON literals and casts", () => {
+      const sql = "UPDATE configs SET data = '{\"api_key\": \"secret123\", \"port\": 5432}'::jsonb WHERE id = 1";
+      const result = redactQueryLiterals(sql);
+      expect(result).not.toContain("secret123");
+      expect(result).not.toContain("5432");
+      expect(result).toContain("::jsonb");
+    });
+
+    it("should redact sensitive credentials in SQL comments", () => {
+      const sql = "SELECT 1; -- password=supersecret\nSELECT 2; /* token: abcdef123456 */";
+      const result = redactQueryLiterals(sql);
+      expect(result).not.toContain("supersecret");
+      expect(result).not.toContain("abcdef123456");
+      expect(result).toContain("[REDACTED]");
+    });
   });
 });

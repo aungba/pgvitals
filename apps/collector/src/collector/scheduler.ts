@@ -18,6 +18,7 @@ import { collectLogInsights } from "./log-insights-collector.js";
 import { collectPlanSnapshots } from "./plan-regression-collector.js";
 import { collectPoolerStats } from "./pooler-collector.js";
 import { collectSchemaDiff } from "./schema-diff-collector.js";
+import { globalClientPool } from "../lib/client-pool.js";
 import type { GeneratedHint } from "./rules-engine.js";
 
 const QUEUE_NAME = "pgvitals-collect";
@@ -433,6 +434,9 @@ export async function stopScheduler(log: FastifyBaseLogger): Promise<void> {
     clearInterval(retentionTimer);
     retentionTimer = null;
   }
+
+  // Close all cached target database connections
+  await globalClientPool.closeAll();
 
   log.info("Scheduler stopped");
 }

@@ -7,6 +7,7 @@ import {
   timestamp,
   jsonb,
   primaryKey,
+  index,
 } from "drizzle-orm/pg-core";
 import { monitoredDatabases } from "./organizations.js";
 
@@ -37,7 +38,10 @@ export const snapshots = pgTable(
     maxConnections: integer("max_connections").notNull(),
     rawPayload: jsonb("raw_payload"),
   },
-  (table) => [primaryKey({ columns: [table.id, table.timestamp] })]
+  (table) => [
+    primaryKey({ columns: [table.id, table.timestamp] }),
+    index("idx_snapshots_db_time").on(table.monitoredDbId, table.timestamp),
+  ]
 );
 
 /**
@@ -70,7 +74,10 @@ export const sessionsSnapshot = pgTable(
     waitEvent: varchar("wait_event", { length: 64 }),
     blockingPid: integer("blocking_pid"),
   },
-  (table) => [primaryKey({ columns: [table.id, table.timestamp] })]
+  (table) => [
+    primaryKey({ columns: [table.id, table.timestamp] }),
+    index("idx_sessions_snapshot_db_time").on(table.monitoredDbId, table.timestamp),
+  ]
 );
 
 /**

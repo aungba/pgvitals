@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { encrypt, decrypt } from "../src/lib/encryption.js";
+import { encrypt, decrypt, LocalAesGcmKeyProvider } from "../src/lib/encryption.js";
 import crypto from "node:crypto";
 
 /* ===================================================================
@@ -11,16 +11,17 @@ describe("encryption", () => {
   const validKey = crypto.randomBytes(32).toString("hex");
 
   describe("encrypt()", () => {
-    it("should return a string in iv:authTag:ciphertext format", () => {
+    it("should return a string in v1:iv:authTag:ciphertext format", () => {
       const result = encrypt("hello world", validKey);
       const parts = result.split(":");
-      expect(parts).toHaveLength(3);
+      expect(parts).toHaveLength(4);
+      expect(parts[0]).toBe("v1");
       // IV = 16 bytes = 32 hex chars
-      expect(parts[0]).toHaveLength(32);
-      // Auth tag = 16 bytes = 32 hex chars
       expect(parts[1]).toHaveLength(32);
+      // Auth tag = 16 bytes = 32 hex chars
+      expect(parts[2]).toHaveLength(32);
       // Ciphertext should be non-empty
-      expect(parts[2].length).toBeGreaterThan(0);
+      expect(parts[3].length).toBeGreaterThan(0);
     });
 
     it("should produce different ciphertexts for the same plaintext (random IV)", () => {
@@ -31,7 +32,7 @@ describe("encryption", () => {
 
     it("should handle empty string", () => {
       const result = encrypt("", validKey);
-      expect(result.split(":")).toHaveLength(3);
+      expect(result.split(":")).toHaveLength(4);
     });
 
     it("should handle unicode text", () => {
@@ -50,10 +51,21 @@ describe("encryption", () => {
   });
 
   describe("decrypt()", () => {
-    it("should correctly decrypt an encrypted value", () => {
+    it("should correctly decrypt a versioned v1 encrypted value", () => {
       const plaintext = "postgresql://user:pass@localhost:5432/db";
       const encrypted = encrypt(plaintext, validKey);
       const decrypted = decrypt(encrypted, validKey);
+      expect(decrypted).toBe(plaintext);
+    });
+
+    it("should correctly decrypt a legacy 3-part format value without version prefix", () => {
+      const plaintext = "postgresql://legacy:pass@localhost:5432/db";
+      const encrypted = encrypt(plaintext, validKey);
+      // Strip v1: prefix to simulate legacy stored string
+      const legacyFormat = encrypted.replace(/^v1:/, "");
+      expect(legacyFormat.split(":")).toHaveLength(3);
+
+      const decrypted = decrypt(legacyFormat, validKey);
       expect(decrypted).toBe(plaintext);
     });
 
@@ -85,8 +97,21 @@ describe("encryption", () => {
       const encrypted = encrypt("test data", validKey);
       const parts = encrypted.split(":");
       // Flip a character in the ciphertext
-      parts[2] = parts[2].slice(0, -1) + (parts[2].at(-1) === "a" ? "b" : "a");
+      parts[3] = parts[3].slice(0, -1) + (parts[3].at(-1) === "a" ? "b" : "a");
       expect(() => decrypt(parts.join(":"), validKey)).toThrow();
+    });
+  });
+
+  describe("LocalAesGcmKeyProvider", () => {
+    it("encrypts and decrypts via KeyProvider interface", () => {
+      const provider = new LocalAesGcmKeyProvider(validKey);
+      const secret = "postgres://root:secret@db.lan/prod";
+
+      const encrypted = provider.encrypt(secret);
+      expect(encrypted).toMatch(/^v1:/);
+
+      const decrypted = provider.decrypt(encrypted);
+      expect(decrypted).toBe(secret);
     });
   });
 });

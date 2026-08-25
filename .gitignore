@@ -29,4 +29,7 @@ Thumbs.db
 coverage/
 *.tsbuildinfo
 jenkins_deploy_log.txt
+.pnpm-store/
+db_err
+
 

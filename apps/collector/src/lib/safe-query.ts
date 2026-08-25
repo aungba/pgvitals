@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { globalClientPool } from "./client-pool.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -6,7 +7,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
  * Validates that a SQL string is a read-only SELECT/SHOW/WITH statement.
  * Rejects anything that looks like a write operation.
  */
-function assertReadOnly(sql: string): void {
+export function assertReadOnly(sql: string): void {
   // Normalize: strip leading whitespace, comments, and get the first keyword
   const normalized = sql
     .replace(/\/\*[\s\S]*?\*\//g, "") // remove block comments
@@ -32,12 +33,13 @@ function assertReadOnly(sql: string): void {
 export interface SafeQueryOptions {
   /** Query timeout in milliseconds. Default: 10000 */
   timeoutMs?: number;
+  /** Whether to use the shared client pool (default: true). Set false for one-off isolated clients */
+  usePool?: boolean;
 }
 
 /**
- * Creates a temporary postgres.js connection to a customer database,
- * executes a read-only query, and returns the results.
- * The connection is closed after use.
+ * Executes a read-only query against a customer database using the managed pool
+ * or an ephemeral connection, with strict timeout and read-only enforcement.
  */
 export async function safeQuery<T extends postgres.MaybeRow[]>(
   connectionString: string,
@@ -47,26 +49,38 @@ export async function safeQuery<T extends postgres.MaybeRow[]>(
   assertReadOnly(sql);
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const usePool = options.usePool ?? true;
 
-  const client = postgres(connectionString, {
-    max: 1,
-    idle_timeout: 5,
-    connect_timeout: 10,
-  });
+  const client = usePool
+    ? globalClientPool.getClient(connectionString)
+    : postgres(connectionString, {
+        max: 1,
+        idle_timeout: 5,
+        connect_timeout: 10,
+        connection: {
+          application_name: "pgvitals_collector",
+        },
+      });
+
+  let timer: NodeJS.Timeout | null = null;
 
   try {
-    const result = await Promise.race([
-      client.unsafe(sql) as Promise<T>,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`Query timed out after ${timeoutMs}ms`)),
-          timeoutMs
-        )
-      ),
-    ]);
+    const queryPromise = client.unsafe(sql) as Promise<T>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`Query timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
 
+    const result = await Promise.race([queryPromise, timeoutPromise]);
     return result;
   } finally {
-    await client.end({ timeout: 5 });
+    if (timer) {
+      clearTimeout(timer);
+    }
+    if (!usePool) {
+      await client.end({ timeout: 5 });
+    }
   }
 }
+

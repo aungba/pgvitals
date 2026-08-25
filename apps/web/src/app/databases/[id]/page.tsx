@@ -29,6 +29,8 @@ import StatsCard from "../../components/StatsCard";
 import StatusBadge from "../../components/StatusBadge";
 import AlertBanner from "../../components/AlertBanner";
 import SessionGroups from "../../components/SessionGroups";
+import { ErrorBoundary } from "../../components/ErrorBoundary";
+import { Skeleton, CardSkeleton, ChartSkeleton, TableSkeleton } from "../../components/Skeleton";
 import Link from "next/link";
 
 /* ===================================================================
@@ -601,12 +603,13 @@ export default function DatabaseDetailPage() {
                 display: "flex",
                 flexDirection: "column",
                 gap: "var(--space-sm)",
-                maxHeight: 360,
+                maxHeight: 480,
                 overflowY: "auto",
+                paddingRight: 4,
               }}
             >
               {sortedHints.slice(0, 5).map((hint, i) => (
-                <HintCard key={hint.id} hint={hint} index={i} />
+                <HintCard key={hint.id} hint={hint} index={i} databaseId={id} />
               ))}
               {sortedHints.length > 5 && (
                 <div style={{ textAlign: "center", paddingTop: "var(--space-xs)" }}>
@@ -669,12 +672,14 @@ export default function DatabaseDetailPage() {
             </button>
           )}
         </div>
-        <ConnectionChart
-          snapshots={snapshots}
-          schemaEvents={schemaEvents}
-          selectedTimestamp={selectedHistoricalTimestamp}
-          onSelectTimestamp={handleSelectSnapshot}
-        />
+        <ErrorBoundary name="Connection Chart">
+          <ConnectionChart
+            snapshots={snapshots}
+            schemaEvents={schemaEvents}
+            selectedTimestamp={selectedHistoricalTimestamp}
+            onSelectTimestamp={handleSelectSnapshot}
+          />
+        </ErrorBoundary>
       </div>
 
       {/* ---------- Time-Travel Replay Banner ---------- */}
@@ -741,7 +746,9 @@ export default function DatabaseDetailPage() {
 
       {/* ---------- Session Grouping ---------- */}
       <div style={{ marginBottom: "var(--space-xl)" }}>
-        <SessionGroups sessions={sessions} maxConnections={max} />
+        <ErrorBoundary name="Session Groups">
+          <SessionGroups sessions={sessions} maxConnections={max} />
+        </ErrorBoundary>
       </div>
 
       {/* ---------- Sessions Table with Search & Filters ---------- */}
@@ -766,7 +773,9 @@ export default function DatabaseDetailPage() {
             </span>
           )}
         </div>
-        <SessionsTable sessions={sessions} />
+        <ErrorBoundary name="Sessions Table">
+          <SessionsTable sessions={sessions} />
+        </ErrorBoundary>
       </div>
     </div>
   );

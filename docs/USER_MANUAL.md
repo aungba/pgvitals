@@ -19,6 +19,7 @@ Welcome to the **PG Vitals User Manual**. This guide provides complete documenta
 11. [Remote Remediation & Slack ChatOps](#11-remote-remediation--slack-chatops)
 12. [Production DBA Sentinel Suite](#12-production-dba-sentinel-suite)
 13. [Root Cause Hints & Incident Audit Logs](#13-root-cause-hints--incident-audit-logs)
+14. [Developer API & Interactive OpenAPI Explorer](#14-developer-api--interactive-openapi-explorer)
 
 ---
 
@@ -71,6 +72,14 @@ Located at: `/databases/[id]`
 ### 2.4 Cascading Lock Queue Storm Sentinel
 - **Detection**: Automatically detects when a root blocker or DDL query holds exclusive table locks and blocks $\ge 2$ downstream transactions.
 - **Alerting**: Triggers `lock_queue_storm` high-priority notifications with root PID and queued query counts.
+
+### 2.5 Real-Time Streaming (Server-Sent Events)
+- **Live Session Updates**: Provides low-latency streaming of active connections and blocking chains via Server-Sent Events (`/api/databases/[id]/live-sessions`).
+- **Zero-Polling Overhead**: Replaces aggressive HTTP polling with push-based delta streaming, eliminating polling overhead on both the browser and collector.
+
+### 2.6 Continuous Metric Rollups & Long-Term Trend Analysis
+- **Resolution Buckets**: Pre-aggregates high-frequency snapshots into `5m` (5-minute), `1h` (hourly), and `1d` (daily) resolution buckets.
+- **Fast Historical Analytics**: Enables instant multi-week and multi-month utilization and query performance graphs without loading hundreds of thousands of raw snapshot rows.
 
 ---
 
@@ -322,5 +331,42 @@ PG Vitals continuously evaluates 7 heuristic diagnostic rules during every colle
   - Diagnostic session metadata (PID, application name, duration, waiting session count).
   - Specific remediation guidance and recommended PostgreSQL parameter tuning.
 - **Exporting Incident Logs**: Export filtered incident records to **CSV** or **JSON** for post-mortem reporting.
+
+---
+
+## 14. Developer API & Interactive OpenAPI Explorer
+
+PG Vitals exposes a fully documented REST and Server-Sent Events API powered by Fastify and OpenAPI 3.1.
+
+### 14.1 Interactive Documentation Portal
+- **Swagger UI**: Visit `http://localhost:3001/documentation` (or your production collector URL) to explore and test endpoints interactively.
+- **OpenAPI 3.1 Spec**: Available in JSON format at `/openapi.json` for client SDK generation.
+
+### 14.2 Key Endpoints
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/databases/:id/overview` | Returns latest connection utilization, active sessions, and database health metrics. |
+| `GET` | `/api/databases/:id/live-sessions` | Server-Sent Events (SSE) stream pushing real-time active sessions and lock events. |
+| `GET` | `/api/databases/:id/rollups` | Fetches pre-aggregated `5m`, `1h`, or `1d` metric rollups over a specified time window. |
+| `GET` | `/api/databases/:id/queries` | Queries `pg_stat_statements` delta metrics with P95/P99 latency calculations. |
+| `GET` | `/api/databases/:id/indexes` | Lists unused, duplicate, invalid (`indisvalid = false`), and bloat-affected indexes. |
+| `GET` | `/api/databases/:id/health` | Comprehensive vacuum, bloat, autovacuum starvation, and WAL velocity health metrics. |
+
+### 14.3 Target Database Connection Pooling & Safety
+- **LRU Client Pool**: The collector caches target database connections with automatic 3-minute idle eviction to minimize connection churn on monitored instances.
+- **Session Read-Only Enforcement**: All diagnostic queries execute with `default_transaction_read_only = on` and query timeout safeguards, guaranteeing non-intrusive monitoring.
+
+### 14.4 High-Throughput Session Broadcasting & Storage Optimization
+- **In-Memory Pub/Sub Hub**: Real-time SSE streaming utilizes a centralized `sessionBroadcaster` event hub, ensuring $O(1)$ database query overhead regardless of how many client dashboard tabs are open.
+- **Storage Bloat Elimination**: Omits redundant session JSON payloads from `snapshots.rawPayload`, preventing WAL write amplification and disk bloat on high-frequency collection intervals.
+- **Chunked Bulk Ingestion**: Ingests snapshot sessions in safe batches of 250 rows to maintain low memory footprints and stay well below PostgreSQL parameter boundaries.
+
+### 14.5 Security, Secret Encryption & Query Redaction
+- **Strict Production CORS**: Enforces strict origin validation in production environments, matching against configured `ALLOWED_ORIGINS` and `DASHBOARD_BASE_URL`.
+- **Envelope Key Provider Interface**: Implements a pluggable `KeyProvider` architecture supporting versioned key storage (`v1:iv:authTag:ciphertext`) with AWS KMS, GCP KMS, and Vault extensibility.
+- **PII & Comment Sanitization**: SQL text sanitization redacts sensitive credentials in comments (`-- password=...`, `/* token: ... */`), nested JSON payloads, and array literals before storage.
+
+
 
 

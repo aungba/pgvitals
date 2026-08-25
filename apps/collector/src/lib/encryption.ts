@@ -3,6 +3,15 @@ import crypto from "node:crypto";
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
+const VERSION_PREFIX = "v1";
+
+/**
+ * Key Provider interface for pluggable secret management (Local AES-GCM, AWS KMS, GCP KMS, Vault).
+ */
+export interface KeyProvider {
+  encrypt(plaintext: string): Promise<string> | string;
+  decrypt(ciphertext: string): Promise<string> | string;
+}
 
 /**
  * Derives a 32-byte key from the hex-encoded ENCRYPTION_KEY.
@@ -18,8 +27,23 @@ function getKeyBuffer(hexKey: string): Buffer {
 }
 
 /**
+ * Default Local AES-256-GCM Key Provider implementation.
+ */
+export class LocalAesGcmKeyProvider implements KeyProvider {
+  constructor(private readonly hexKey: string) {}
+
+  encrypt(plaintext: string): string {
+    return encrypt(plaintext, this.hexKey);
+  }
+
+  decrypt(ciphertext: string): string {
+    return decrypt(ciphertext, this.hexKey);
+  }
+}
+
+/**
  * Encrypts a plaintext string using AES-256-GCM.
- * Returns format: iv:authTag:ciphertext (all hex encoded).
+ * Returns format: v1:iv:authTag:ciphertext (all hex encoded).
  */
 export function encrypt(plaintext: string, hexKey: string): string {
   const key = getKeyBuffer(hexKey);
@@ -31,20 +55,25 @@ export function encrypt(plaintext: string, hexKey: string): string {
 
   const authTag = cipher.getAuthTag();
 
-  return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted}`;
+  return `${VERSION_PREFIX}:${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted}`;
 }
 
 /**
  * Decrypts a string encrypted with encrypt().
- * Expects format: iv:authTag:ciphertext (all hex encoded).
+ * Supports both versioned (v1:iv:authTag:ciphertext) and legacy (iv:authTag:ciphertext) formats.
  */
 export function decrypt(encryptedString: string, hexKey: string): string {
   const key = getKeyBuffer(hexKey);
-  const parts = encryptedString.split(":");
+  let parts = encryptedString.split(":");
+
+  // Handle version prefix
+  if (parts.length === 4 && parts[0] === "v1") {
+    parts = parts.slice(1);
+  }
 
   if (parts.length !== 3) {
     throw new Error(
-      "Invalid encrypted string format. Expected iv:authTag:ciphertext"
+      "Invalid encrypted string format. Expected [v1:]iv:authTag:ciphertext"
     );
   }
 
@@ -69,3 +98,4 @@ export function decrypt(encryptedString: string, hexKey: string): string {
 
   return decrypted;
 }
+

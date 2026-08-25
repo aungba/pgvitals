@@ -251,6 +251,65 @@ export async function getSnapshots(
   return data.snapshots;
 }
 
+export interface MetricRollup {
+  id: string;
+  monitoredDbId: string;
+  resolution: "5m" | "1h" | "1d";
+  bucket: string;
+  activeConnectionsAvg: number | null;
+  activeConnectionsMax: number | null;
+  connectionCountAvg: number | null;
+  connectionCountMax: number | null;
+  idleInTxnMax: number | null;
+  avgQueryTimeMs: number | null;
+  maxQueryTimeMs: number | null;
+  totalCalls: number | null;
+  createdAt: string;
+}
+
+export async function getRollups(
+  id: string,
+  resolution: "5m" | "1h" | "1d" = "5m",
+  hours = 24,
+  token?: string,
+): Promise<MetricRollup[]> {
+  const params = new URLSearchParams();
+  params.set("resolution", resolution);
+  params.set("hours", hours.toString());
+  const data = await request<{ rollups: MetricRollup[] }>(
+    `/api/databases/${id}/rollups?${params.toString()}`,
+    { token },
+  );
+  return data.rollups ?? [];
+}
+
+export function subscribeLiveSessions(
+  id: string,
+  token?: string,
+  onData?: (data: { snapshotId?: string; timestamp?: string; sessions: Session[] }) => void,
+  onError?: (err: Event) => void,
+): () => void {
+  const url = `${API_URL}/api/databases/${id}/live-sessions${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  const eventSource = new EventSource(url);
+
+  eventSource.onmessage = (event) => {
+    try {
+      const parsed = JSON.parse(event.data);
+      onData?.(parsed);
+    } catch {
+      // ignore parse errors
+    }
+  };
+
+  eventSource.onerror = (err) => {
+    onError?.(err);
+  };
+
+  return () => {
+    eventSource.close();
+  };
+}
+
 export interface GetHintsOptions {
   hours?: number;
   severity?: string;

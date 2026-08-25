@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
 import { safeQuery } from "../lib/safe-query.js";
 import { redactQueryLiterals } from "../lib/redact-query.js";
+import { sessionBroadcaster } from "../lib/session-broadcaster.js";
 import { config } from "../config.js";
 
 /** Raw row from pg_stat_activity */
@@ -159,33 +160,44 @@ export async function collectSnapshot(
       idleInTxnCount: aggregates.idleInTxnCount,
       idleInTxnAbortedCount: aggregates.idleInTxnAbortedCount,
       maxConnections: aggregates.maxConnections,
-      rawPayload: { sessions, blockingPairs },
+      rawPayload: { blockingPairs },
     })
     .returning({ id: snapshots.id });
 
   const snapshotId = snapshotRow.id;
 
-  // 9. Write session snapshot rows
-  if (sessions.length > 0) {
-    const sessionRows = sessions.map((s) => ({
-      snapshotId,
-      monitoredDbId,
-      timestamp: now,
-      pid: s.pid,
-      usename: s.usename,
-      applicationName: s.application_name,
-      clientAddr: s.client_addr,
-      state: s.state,
-      stateDurationSeconds: s.state_duration_seconds,
-      queryText: s.query_text ? redactQueryLiterals(s.query_text) : null,
-      queryStart: s.query_start ? new Date(s.query_start) : null,
-      waitEventType: s.wait_event_type,
-      waitEvent: s.wait_event,
-      blockingPid: blockingMap.get(s.pid) ?? null,
-    }));
+  // 9. Write session snapshot rows in chunks of 250
+  const sessionRows = sessions.map((s) => ({
+    snapshotId,
+    monitoredDbId,
+    timestamp: now,
+    pid: s.pid,
+    usename: s.usename,
+    applicationName: s.application_name,
+    clientAddr: s.client_addr,
+    state: s.state,
+    stateDurationSeconds: s.state_duration_seconds,
+    queryText: s.query_text ? redactQueryLiterals(s.query_text) : null,
+    queryStart: s.query_start ? new Date(s.query_start) : null,
+    waitEventType: s.wait_event_type,
+    waitEvent: s.wait_event,
+    blockingPid: blockingMap.get(s.pid) ?? null,
+  }));
 
-    await db.insert(sessionsSnapshot).values(sessionRows);
+  if (sessionRows.length > 0) {
+    const CHUNK_SIZE = 250;
+    for (let i = 0; i < sessionRows.length; i += CHUNK_SIZE) {
+      const chunk = sessionRows.slice(i, i + CHUNK_SIZE);
+      await db.insert(sessionsSnapshot).values(chunk);
+    }
   }
+
+  // 10. Broadcast real-time update to active SSE clients with zero DB query overhead
+  sessionBroadcaster.publish(monitoredDbId, {
+    snapshotId,
+    timestamp: now,
+    sessions: sessionRows,
+  });
 
   log.info(
     {

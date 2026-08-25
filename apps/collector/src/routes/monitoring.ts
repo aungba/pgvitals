@@ -6,20 +6,25 @@ import {
   rootCauseHints,
   monitoredDatabases,
   dbHealthSnapshots,
+  metricRollups,
 } from "@pgvitals/db";
 import { eq, desc, and, gte, lte } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
+import { sessionBroadcaster } from "../lib/session-broadcaster.js";
 
 /**
- * Verifies that the given database belongs to the given organization.
+ * Verifies that the given database belongs to the given organization and returns basic DB info.
  */
-async function verifyDbOwnership(dbId: string, orgId: string): Promise<boolean> {
+async function verifyDbOwnership(
+  dbId: string,
+  orgId: string
+): Promise<{ id: string; name: string } | null> {
   const [mdb] = await db
-    .select({ id: monitoredDatabases.id })
+    .select({ id: monitoredDatabases.id, name: monitoredDatabases.name })
     .from(monitoredDatabases)
     .where(and(eq(monitoredDatabases.id, dbId), eq(monitoredDatabases.orgId, orgId)))
     .limit(1);
-  return !!mdb;
+  return mdb ?? null;
 }
 
 export default async function monitoringRoutes(app: FastifyInstance): Promise<void> {
@@ -34,15 +39,10 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
         const { id } = request.params;
 
         // Verify database exists and belongs to this org
-        if (!await verifyDbOwnership(id, request.auth.orgId)) {
+        const mdb = await verifyDbOwnership(id, request.auth.orgId);
+        if (!mdb) {
           return reply.status(404).send({ error: "Database not found" });
         }
-
-        const [mdb] = await db
-          .select({ id: monitoredDatabases.id, name: monitoredDatabases.name })
-          .from(monitoredDatabases)
-          .where(eq(monitoredDatabases.id, id))
-          .limit(1);
 
         // Get the latest snapshot
         const [latestSnapshot] = await db
@@ -356,6 +356,122 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
       } catch (err) {
         request.log.error({ err }, "Failed to get hints");
         return reply.status(500).send({ error: "Failed to get hints" });
+      }
+    }
+  );
+
+  /**
+   * GET /api/databases/:id/live-sessions — Server-Sent Events stream for real-time sessions.
+   */
+  app.get<{ Params: { id: string } }>(
+    "/api/databases/:id/live-sessions",
+    { preHandler: [authMiddleware] },
+    async (request, reply) => {
+      const { id } = request.params;
+
+      const mdb = await verifyDbOwnership(id, request.auth.orgId);
+      if (!mdb) {
+        return reply.status(404).send({ error: "Database not found" });
+      }
+
+      reply.raw.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      });
+
+      // 1. Send immediate state from in-memory cache or single cold query
+      const cached = sessionBroadcaster.getLatest(id);
+      if (cached) {
+        reply.raw.write(`data: ${JSON.stringify(cached)}\n\n`);
+      } else {
+        try {
+          const [latestSnapshot] = await db
+            .select({ id: snapshots.id, timestamp: snapshots.timestamp })
+            .from(snapshots)
+            .where(eq(snapshots.monitoredDbId, id))
+            .orderBy(desc(snapshots.timestamp))
+            .limit(1);
+
+          if (latestSnapshot) {
+            const sessions = await db
+              .select()
+              .from(sessionsSnapshot)
+              .where(
+                and(
+                  eq(sessionsSnapshot.monitoredDbId, id),
+                  eq(sessionsSnapshot.snapshotId, latestSnapshot.id)
+                )
+              );
+
+            const initialData = {
+              snapshotId: latestSnapshot.id,
+              timestamp: latestSnapshot.timestamp,
+              sessions,
+            };
+            sessionBroadcaster.publish(id, initialData);
+            reply.raw.write(`data: ${JSON.stringify(initialData)}\n\n`);
+          } else {
+            reply.raw.write(`data: ${JSON.stringify({ sessions: [] })}\n\n`);
+          }
+        } catch (err) {
+          request.log.error({ err }, "Error fetching initial SSE session snapshot");
+        }
+      }
+
+      // 2. Subscribe to push events (0 database queries per interval across all N clients)
+      const unsubscribe = sessionBroadcaster.subscribe(id, (payload) => {
+        try {
+          reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+        } catch {
+          // ignore write errors if client disconnected abruptly
+        }
+      });
+
+      request.raw.on("close", () => {
+        unsubscribe();
+      });
+    }
+  );
+
+  /**
+   * GET /api/databases/:id/rollups — Get continuous pre-aggregated metrics.
+   */
+  app.get<{
+    Params: { id: string };
+    Querystring: { resolution?: string; hours?: string };
+  }>(
+    "/api/databases/:id/rollups",
+    { preHandler: [authMiddleware] },
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+        const { resolution = "5m", hours = "24" } = request.query;
+
+        if (!await verifyDbOwnership(id, request.auth.orgId)) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const parsedHours = Math.max(1, parseFloat(hours));
+        const fromTime = new Date(Date.now() - parsedHours * 60 * 60 * 1000);
+
+        const rollups = await db
+          .select()
+          .from(metricRollups)
+          .where(
+            and(
+              eq(metricRollups.monitoredDbId, id),
+              eq(metricRollups.resolution, resolution),
+              gte(metricRollups.bucket, fromTime)
+            )
+          )
+          .orderBy(desc(metricRollups.bucket))
+          .limit(500);
+
+        return reply.send({ rollups });
+      } catch (err) {
+        request.log.error({ err }, "Failed to get metric rollups");
+        return reply.status(500).send({ error: "Failed to get rollups" });
       }
     }
   );

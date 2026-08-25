@@ -66,6 +66,7 @@ export const queryStats = pgTable(
   (table) => [
     primaryKey({ columns: [table.id, table.capturedAt] }),
     index("idx_query_stats_dbid_queryid").on(table.monitoredDbId, table.queryid),
+    index("idx_query_stats_db_time").on(table.monitoredDbId, table.capturedAt),
   ]
 );
 

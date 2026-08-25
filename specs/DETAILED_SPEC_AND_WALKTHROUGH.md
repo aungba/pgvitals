@@ -1,7 +1,7 @@
 # PG Vitals — Detailed Technical Specification & Codebase Walkthrough
 
-> **Version:** 0.6.0 | **Last Updated:** 2026-08-19  
-> **Status:** All product phases 1–12 implemented. Includes Phase 12 Production DBA Sentinel Suite: Replication Slot WAL Retention Sentinel, Invalid (`indisvalid = false`) & Redundant Index Detection, B-Tree Index Bloat Estimator, Checkpoint Sync vs. Write Breakdown, WAL Velocity (MB/min), Archiver Health, HOT Update Efficiency, and Cascading Lock Queue Storm Sentinel. Test suite contains 115 tests across 12 test suites.
+> **Version:** 0.9.0 | **Last Updated:** 2026-08-25  
+> **Status:** All product phases 1–12 and Performance Bottleneck Remediations implemented: In-Memory Pub/Sub `SessionBroadcaster` ($O(1)$ database query overhead for multi-client SSE live streaming), elimination of duplicate `snapshots.rawPayload` JSON bloat, 250-row chunked bulk session inserts, single-query `verifyDbOwnership` resolution, React Query with custom hooks, Skeleton loading states, and Error Boundaries. Test suite contains 129 tests across 15 test files.
 
 ---
 
@@ -148,6 +148,7 @@ pgvitals/
 │   │   │   │   ├── pooler-collector.ts       # PgBouncer SHOW POOLS metrics
 │   │   │   │   ├── schema-diff-collector.ts  # DDL change detection via diffing
 │   │   │   │   ├── hypopg-simulator.ts       # HypoPG hypothetical index simulation
+│   │   │   │   ├── rollup-collector.ts       # Continuous 5m/1h/1d metrics rollups
 │   │   │   │   └── retention.ts      # Tier-based data purge
 │   │   │   ├── alerting/
 │   │   │   │   ├── engine.ts         # Alert evaluation, dedup, fire/resolve
@@ -159,16 +160,22 @@ pgvitals/
 │   │   │   │   ├── auth.ts           # Clerk JWT verification + dev fallback
 │   │   │   │   └── plan-limits.ts    # Plan-based feature gating
 │   │   │   └── lib/
-│   │   │       ├── encryption.ts     # AES-256-GCM encrypt/decrypt
-│   │   │       ├── safe-query.ts     # Read-only SQL execution safety net
-│   │   │       ├── redact-query.ts   # Query text literal redaction (PII)
+│   │   │       ├── encryption.ts     # AES-256-GCM encrypt/decrypt + KeyProvider
+│   │   │       ├── safe-query.ts     # Read-only SQL execution + timer leak prevention
+│   │   │       ├── client-pool.ts    # Managed target DB connection pool (LRU + idle eviction)
+│   │   │       ├── session-broadcaster.ts # Pub/sub event broadcaster for multi-client SSE live streaming
+│   │   │       ├── redact-query.ts   # Query text literal & comment redaction (PII)
 │   │   │       └── cost-model.ts     # Cost-per-query USD estimation
-│   │   ├── tests/                    # Vitest unit tests (80 tests, 5 suites)
+│   │   ├── tests/                    # Vitest unit tests (129 tests, 15 suites)
 │   │   │   ├── encryption.test.ts
 │   │   │   ├── redact-query.test.ts
 │   │   │   ├── cost-model.test.ts
 │   │   │   ├── fingerprint.test.ts
-│   │   │   └── safe-query.test.ts
+│   │   │   ├── safe-query.test.ts
+│   │   │   ├── client-pool.test.ts
+│   │   │   ├── session-broadcaster.test.ts
+│   │   │   ├── rollup-collector.test.ts
+│   │   │   └── ...
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
@@ -231,7 +238,8 @@ pgvitals/
 │       │       ├── log-insights.ts    # log_insights, db_error_stats
 │       │       ├── schema-events.ts   # schema_events, schema_snapshots
 │       │       ├── query-plans.ts     # query_plan_snapshots
-│       │       └── pooler.ts          # pooler_snapshots
+│       │       ├── pooler.ts          # pooler_snapshots
+│       │       └── rollups.ts         # metric_rollups (5m, 1h, 1d pre-aggregated metrics)
 │       ├── drizzle/                   # Generated SQL migrations (12 files)
 │       ├── drizzle.config.ts
 │       ├── package.json
@@ -857,6 +865,9 @@ Detects DDL changes (CREATE/DROP table/column/index) via periodic schema diffing
 | `AlertBanner` | Active alert notification banner |
 | `AlertHistory` | Timeline of past alerts with thumbs up/down feedback buttons |
 | `ThemeToggle` | Dark/light mode toggle (persisted to `localStorage`) |
+| `ErrorBoundary` | React class Error Boundary with retry trigger to isolate chart/table failures |
+| `Skeleton` | Shimmering card, chart, and table loading skeleton placeholders |
+| `QueryProvider` | Global `@tanstack/react-query` context provider |
 
 ### 7.4 Collapsible Sidebar
 
@@ -890,6 +901,17 @@ Type-safe fetch wrapper with:
 - Full TypeScript interfaces for all API responses
 - 35+ API functions covering all collector endpoints
 
+### 7.7 React Query Architecture & Monitoring Hooks
+
+**File:** `src/app/lib/hooks/useMonitoring.ts`
+
+Standardized `@tanstack/react-query` hooks with window-focus revalidation, automatic cache deduplication, and streaming fallback:
+- `useOverview(dbId, token)`: Overview metrics and connection gauge data (cached with 10s refetch interval).
+- `useSnapshots(dbId, limit, from, to, token)`: Time-series connection history snapshots.
+- `useRollups(dbId, resolution, hours, token)`: Pre-aggregated 5m/1h/1d continuous rollups.
+- `useQueriesList(dbId, sort, limit, token)`: Query performance metrics with tail latencies.
+- `useLiveSessions(dbId, token)`: Subscribes directly to Server-Sent Events with automatic fallback to polling if disconnected.
+
 ---
 
 ## 8. API Reference
@@ -911,8 +933,18 @@ Type-safe fetch wrapper with:
 |--------|----------|-------------|
 | `GET` | `/api/databases/:id/overview` | Latest snapshot + utilization % |
 | `GET` | `/api/databases/:id/sessions` | Latest or historical session details (`?timestamp=` or `?snapshotId=`) |
+| `GET` | `/api/databases/:id/live-sessions` | Real-time Server-Sent Events (SSE) stream for live active sessions & locks |
+| `GET` | `/api/databases/:id/rollups` | Pre-aggregated metric rollups (`?resolution=5m\|1h\|1d&hours=24`) |
 | `GET` | `/api/databases/:id/snapshots` | Time-series snapshots (`?from=&to=&limit=`) |
 | `GET` | `/api/databases/:id/hints` | Active or historical root-cause hints (`?hours=&severity=&ruleType=&limit=&offset=`) |
+
+### Developer Documentation
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/documentation` | Interactive Swagger UI API documentation portal |
+| `GET` | `/openapi.json` | OpenAPI 3.1 JSON specification |
+
 
 ### Alerts
 

@@ -1,6 +1,8 @@
 import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import { config } from "./config.js";
 import routes from "./routes/index.js";
 import { startScheduler, stopScheduler } from "./collector/scheduler.js";
@@ -17,9 +19,47 @@ const app = Fastify({
 
 // --- Plugins ---
 await app.register(cors, {
-  origin: true,
+  origin: (origin, cb) => {
+    // Allow non-browser / server-to-server requests (no origin header)
+    if (!origin) {
+      return cb(null, true);
+    }
+    // Allow any origin during non-production local development
+    if (process.env.NODE_ENV !== "production") {
+      return cb(null, true);
+    }
+    // Validate against configured allowed origins in production
+    if (config.allowedOrigins.includes(origin)) {
+      return cb(null, true);
+    }
+    return cb(new Error(`Origin "${origin}" not allowed by CORS policy`), false);
+  },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+});
+
+await app.register(swagger, {
+  openapi: {
+    info: {
+      title: "PG Vitals API",
+      description: "PostgreSQL monitoring, diagnostics and alerting API",
+      version: "1.0.0",
+    },
+    servers: [
+      {
+        url: `http://localhost:${config.collectorPort}`,
+        description: "Local Collector",
+      },
+    ],
+  },
+});
+
+await app.register(swaggerUi, {
+  routePrefix: "/documentation",
+  uiConfig: {
+    docExpansion: "list",
+    deepLinking: true,
+  },
 });
 
 // --- Routes ---

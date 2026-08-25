@@ -62,3 +62,8 @@ export {
 export {
   poolerSnapshots,
 } from "./pooler.js";
+
+export {
+  metricRollups,
+} from "./rollups.js";
+

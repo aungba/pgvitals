@@ -14,7 +14,17 @@ export interface Config {
   stripeProPriceId: string;
   stripeTeamPriceId: string;
   dashboardBaseUrl: string;
+  allowedOrigins: string[];
 }
+
+const parseAllowedOrigins = (): string[] => {
+  const envOrigins = process.env.ALLOWED_ORIGINS;
+  if (envOrigins) {
+    return envOrigins.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  const dashboardUrl = process.env.DASHBOARD_BASE_URL ?? "http://localhost:3000";
+  return [dashboardUrl, "http://localhost:3000", "http://127.0.0.1:3000"];
+};
 
 export const config: Config = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/pgvitals",
@@ -30,6 +40,7 @@ export const config: Config = {
   stripeProPriceId: process.env.STRIPE_PRO_PRICE_ID ?? "",
   stripeTeamPriceId: process.env.STRIPE_TEAM_PRICE_ID ?? "",
   dashboardBaseUrl: process.env.DASHBOARD_BASE_URL ?? "http://localhost:3000",
+  allowedOrigins: parseAllowedOrigins(),
 };
 
 

@@ -31,10 +31,16 @@ export function redactQueryLiterals(sql: string): string {
 
   let result = sql;
 
+  // 0. Redact sensitive credential patterns in comments (-- password=..., /* token: ... */)
+  result = result.replace(
+    /(--|\/\*)\s*(?:password|secret|token|api_key|authorization|bearer)\s*[:=]\s*([^\s*]+)/gi,
+    (match, prefix) => `${prefix} [REDACTED]`
+  );
+
   // 1. Replace dollar-quoted strings: $$...$$, $tag$...$tag$
   result = result.replace(/\$([a-zA-Z_]*)\$[\s\S]*?\$\1\$/g, () => next());
 
-  // 2. Replace single-quoted strings (handling escaped quotes: '')
+  // 2. Replace single-quoted strings (handling escaped quotes: '', covers JSON and string literals)
   result = result.replace(/'(?:[^']|'')*'/g, () => next());
 
   // 3. Replace UUID-like patterns (before general hex/numeric)
