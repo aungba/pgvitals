@@ -603,13 +603,12 @@ export default function DatabaseDetailPage() {
                 display: "flex",
                 flexDirection: "column",
                 gap: "var(--space-sm)",
-                maxHeight: 480,
+                maxHeight: 360,
                 overflowY: "auto",
-                paddingRight: 4,
               }}
             >
               {sortedHints.slice(0, 5).map((hint, i) => (
-                <HintCard key={hint.id} hint={hint} index={i} databaseId={id} />
+                <HintCard key={hint.id} hint={hint} index={i} />
               ))}
               {sortedHints.length > 5 && (
                 <div style={{ textAlign: "center", paddingTop: "var(--space-xs)" }}>
