@@ -852,18 +852,19 @@ Detects DDL changes (CREATE/DROP table/column/index) via periodic schema diffing
 | Component | Purpose |
 |-----------|---------|
 | `Sidebar` | Collapsible navigation sidebar — client component with localStorage-persisted collapse state |
-| `ConnectionGauge` | SVG radial gauge showing connection utilization % |
+| `ConnectionGauge` | SVG radial gauge showing connection utilization % with stacked pool composition bar, active/idle/idle-in-txn breakdown, and headroom capacity metrics |
 | `ConnectionChart` | Recharts time-series area chart for connection counts + schema change markers (ReferenceLine) |
-| `SessionsTable` | Sortable, filterable table of active PostgreSQL sessions |
+| `SessionsTable` | Sortable, filterable table of active PostgreSQL sessions with sticky column headers |
 | `SessionGroups` | Sessions grouped by application_name, usename, or state |
 | `PlanDiffVisualizer` | Dual-column side-by-side execution plan diff view with node difference highlights and delta metrics |
 | `PlanTreeVisualizer` | SVG hierarchical execution plan tree map with interactive pan/zoom and collapsible nodes |
 | `PlanListView` | Indented flat tabular breakdown of EXPLAIN execution nodes |
 | `HintCard` | Root-cause hint card with severity indicator |
-| `StatsCard` | Metric display card (value + label) |
+| `StatsCard` | Metric display card (value + label) with automatic thousands separators |
 | `StatusBadge` | Environment badge (production/staging/development) |
 | `AlertBanner` | Active alert notification banner |
 | `AlertHistory` | Timeline of past alerts with thumbs up/down feedback buttons |
+| `ScrollToTop` | Floating pill button for smooth 1-click return to top on long dashboard views |
 | `ThemeToggle` | Dark/light mode toggle (persisted to `localStorage`) |
 | `ErrorBoundary` | React class Error Boundary with retry trigger to isolate chart/table failures |
 | `Skeleton` | Shimmering card, chart, and table loading skeleton placeholders |
@@ -911,6 +912,14 @@ Standardized `@tanstack/react-query` hooks with window-focus revalidation, autom
 - `useRollups(dbId, resolution, hours, token)`: Pre-aggregated 5m/1h/1d continuous rollups.
 - `useQueriesList(dbId, sort, limit, token)`: Query performance metrics with tail latencies.
 - `useLiveSessions(dbId, token)`: Subscribes directly to Server-Sent Events with automatic fallback to polling if disconnected.
+
+### 7.8 Sticky Navigation, Formatting & Usability System
+
+- **Glassmorphic Sticky Sub-Navigation (`.db-nav`):** Top-level database navigation is pinned (`position: sticky; top: 0; z-index: 25;`) with `backdrop-filter: blur(16px)` and elevation shadow, allowing quick switching between subpages (*Overview*, *Hints*, *Queries*, *Health*, *Logs*, etc.) regardless of scroll position.
+- **Sticky Table Headers (`.alert-table-th`):** Column headers across all data tables (`SessionsTable`, `Health`, `Queries`, `Logs`) stay pinned to the top of their scrollable containers, maintaining column context for wide tables.
+- **Floating Return-to-Top (`ScrollToTop`):** Appears automatically after scrolling past 350px, providing smooth one-click return to top-level overview cards and performance charts.
+- **Universal Thousands Separators:** All metric values, tuple counts, scan counts, vacuum counts, connection totals, and table pagination numbers are formatted with standard locale separators (`toLocaleString()`).
+- **Log Insights Window Deltas:** Deadlock and rollback counters compute true window deltas (`latest - oldest in window`) alongside cumulative lifetime counts, and the collector establishes a clean baseline on initial registration to prevent false alarms.
 
 ---
 

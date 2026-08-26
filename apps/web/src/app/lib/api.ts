@@ -1011,32 +1011,6 @@ export async function removeMember(
   });
 }
 
-/* ---------- Cost-Per-Query Estimator (§2.11) ---------- */
-
-export interface QueryCostEstimate {
-  queryid: number;
-  queryText: string;
-  calls: number;
-  totalTimeMs: number;
-  estimatedIoCostPerMonth: number;
-  estimatedCpuCostPerMonth: number;
-  estimatedTotalCostPerMonth: number;
-  breakdown: {
-    diskReadsPerMonth: number;
-    cpuSecondsPerMonth: number;
-  };
-}
-
-export async function getQueryCostEstimates(
-  dbId: string,
-  token?: string,
-): Promise<{ disclaimer: string; estimates: QueryCostEstimate[] }> {
-  return request<{ disclaimer: string; estimates: QueryCostEstimate[] }>(
-    `/api/databases/${dbId}/queries/cost-estimates`,
-    { token },
-  );
-}
-
 /* ---------- Plan Regression Detection (§2.10) ---------- */
 
 export interface PlanRegressionAnalysis {

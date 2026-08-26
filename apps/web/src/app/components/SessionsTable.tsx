@@ -148,6 +148,10 @@ export default function SessionsTable({ sessions }: SessionsTableProps) {
   }
 
   const thStyle: React.CSSProperties = {
+    position: "sticky",
+    top: 0,
+    zIndex: 5,
+    background: "var(--surface)",
     padding: "10px 14px",
     textAlign: "left",
     fontSize: "0.7rem",
@@ -256,21 +260,21 @@ export default function SessionsTable({ sessions }: SessionsTableProps) {
               data-active={stateFilter === "all"}
               onClick={() => setStateFilter("all")}
             >
-              All ({sessions.length})
+              All ({sessions.length.toLocaleString()})
             </button>
             <button
               className="filter-chip"
               data-active={stateFilter === "active"}
               onClick={() => setStateFilter("active")}
             >
-              ⚡ Active ({activeCount})
+              ⚡ Active ({activeCount.toLocaleString()})
             </button>
             <button
               className="filter-chip"
               data-active={stateFilter === "idle_in_txn"}
               onClick={() => setStateFilter("idle_in_txn")}
             >
-              ⏳ Idle in Txn ({idleInTxnCount})
+              ⏳ Idle in Txn ({idleInTxnCount.toLocaleString()})
             </button>
             {blockerOrBlockedCount > 0 && (
               <button
@@ -278,7 +282,7 @@ export default function SessionsTable({ sessions }: SessionsTableProps) {
                 data-active={stateFilter === "blocking"}
                 onClick={() => setStateFilter("blocking")}
               >
-                ⛔ Lock Issues ({blockerOrBlockedCount})
+                ⛔ Lock Issues ({blockerOrBlockedCount.toLocaleString()})
               </button>
             )}
             <button
@@ -286,13 +290,13 @@ export default function SessionsTable({ sessions }: SessionsTableProps) {
               data-active={stateFilter === "idle"}
               onClick={() => setStateFilter("idle")}
             >
-              💤 Idle ({idleCount})
+              💤 Idle ({idleCount.toLocaleString()})
             </button>
           </div>
         </div>
 
         <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-          Showing {filteredAndSorted.length} of {sessions.length} sessions
+          Showing {filteredAndSorted.length.toLocaleString()} of {sessions.length.toLocaleString()} sessions
         </span>
       </div>
 

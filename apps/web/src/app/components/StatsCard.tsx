@@ -73,7 +73,7 @@ export default function StatsCard({
             fontFamily: "var(--font-mono)",
           }}
         >
-          {value}
+          {typeof value === "number" ? value.toLocaleString() : value}
         </div>
         {subtitle && (
           <div

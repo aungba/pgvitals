@@ -31,12 +31,12 @@ export default function AlertBanner({ alerts, databaseId }: AlertBannerProps) {
       </div>
       <div className="alert-banner-content">
         <strong>
-          {alerts.length} active alert{alerts.length !== 1 ? "s" : ""}
+          {alerts.length.toLocaleString()} active alert{alerts.length !== 1 ? "s" : ""}
         </strong>
         <span className="alert-banner-detail">
-          {criticalCount > 0 && `${criticalCount} critical`}
+          {criticalCount > 0 && `${criticalCount.toLocaleString()} critical`}
           {criticalCount > 0 && warningCount > 0 && ", "}
-          {warningCount > 0 && `${warningCount} warning`}
+          {warningCount > 0 && `${warningCount.toLocaleString()} warning`}
           {" · Click to manage"}
         </span>
       </div>

@@ -85,9 +85,7 @@ function getCostBarColor(pct: number): string {
 
 function formatNumber(n: number | undefined): string {
   if (n === undefined || n === null) return "—";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toFixed(n < 10 ? 2 : 0);
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 /* ---------- Node Card Component ---------- */

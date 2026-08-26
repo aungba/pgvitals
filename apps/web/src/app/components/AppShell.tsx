@@ -4,6 +4,7 @@ import React from "react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import Sidebar from "./Sidebar";
+import ScrollToTop from "./ScrollToTop";
 
 const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -29,7 +30,10 @@ export default function AppShell({ children }: AppShellProps) {
   return (
     <div className="app-layout">
       <Sidebar />
-      <main className="main-content">{children}</main>
+      <main className="main-content">
+        {children}
+        <ScrollToTop />
+      </main>
     </div>
   );
 }

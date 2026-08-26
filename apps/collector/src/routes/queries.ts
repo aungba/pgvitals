@@ -9,7 +9,6 @@ import { captureExplain } from "../collector/explain-capture.js";
 import { estimatePercentiles } from "../collector/percentile-calculator.js";
 import { authMiddleware, requireRole } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
-import { estimateQueryCosts } from "../lib/cost-model.js";
 import { analyzePlanRegression } from "../collector/plan-regression-collector.js";
 
 /* ===================================================================
@@ -448,118 +447,6 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         request.log.error({ err }, "Failed to dismiss query suggestion");
         return reply.status(500).send({ error: "Failed to dismiss suggestion" });
-      }
-    }
-  );
-
-  /**
-   * GET /api/databases/:id/queries/cost-estimates
-   * Estimate monthly cost per query based on I/O and CPU metrics.
-   * Spec §2.11 — Cost-Per-Query Estimator
-   */
-  app.get<{
-    Params: { id: string };
-    Querystring: { costPerIop?: string; costPerCpuSecond?: string };
-  }>(
-    "/api/databases/:id/queries/cost-estimates",
-    { preHandler: [authMiddleware, requireFeature("queryPerformanceEnabled")] },
-    async (request, reply) => {
-      const { id } = request.params;
-
-      try {
-        // Get latest capture time
-        const [latestCapture] = await db
-          .select({ capturedAt: queryStats.capturedAt })
-          .from(queryStats)
-          .where(eq(queryStats.monitoredDbId, id))
-          .orderBy(desc(queryStats.capturedAt))
-          .limit(1);
-
-        if (!latestCapture) {
-          return reply.send({
-            disclaimer: "These are directional estimates based on I/O and CPU metrics, not precise billing figures.",
-            estimates: [],
-          });
-        }
-
-        // Fetch all queries from latest snapshot
-        const rawQueries = await db
-          .select()
-          .from(queryStats)
-          .where(
-            and(
-              eq(queryStats.monitoredDbId, id),
-              eq(queryStats.capturedAt, latestCapture.capturedAt)
-            )
-          )
-          .orderBy(desc(queryStats.totalTimeMs))
-          .limit(50);
-
-        // Aggregate by queryid to merge multiple entries (e.g., from different roles/toplevel)
-        const queryMap = new Map<number, {
-          queryid: number;
-          queryText: string;
-          calls: number;
-          totalTimeMs: number;
-          sharedBlksRead: number;
-        }>();
-        for (const q of rawQueries) {
-          const existing = queryMap.get(q.queryid);
-          if (existing) {
-            existing.calls += q.calls;
-            existing.totalTimeMs += q.totalTimeMs;
-            existing.sharedBlksRead += q.sharedBlksRead;
-            if (!existing.queryText && q.queryText) {
-              existing.queryText = q.queryText;
-            }
-          } else {
-            queryMap.set(q.queryid, {
-              queryid: q.queryid,
-              queryText: q.queryText,
-              calls: q.calls,
-              totalTimeMs: q.totalTimeMs,
-              sharedBlksRead: q.sharedBlksRead,
-            });
-          }
-        }
-        const queries = Array.from(queryMap.values());
-
-        // Build custom cost model if params provided
-        const customModel = {
-          costPerIop: request.query.costPerIop
-            ? parseFloat(request.query.costPerIop)
-            : undefined,
-          costPerCpuSecond: request.query.costPerCpuSecond
-            ? parseFloat(request.query.costPerCpuSecond)
-            : undefined,
-          blockSizeBytes: 8192,
-        };
-
-        const costModelArg = (customModel.costPerIop || customModel.costPerCpuSecond)
-          ? {
-              costPerIop: customModel.costPerIop ?? 0.00000008,
-              costPerCpuSecond: customModel.costPerCpuSecond ?? 0.00004,
-              blockSizeBytes: 8192,
-            }
-          : undefined;
-
-        const estimates = estimateQueryCosts(
-          queries,
-          24, // assume 24h snapshot window
-          costModelArg
-        );
-
-        // Sort by total estimated cost desc
-        estimates.sort((a, b) => b.estimatedTotalCostPerMonth - a.estimatedTotalCostPerMonth);
-
-        return reply.send({
-          disclaimer: "These are directional estimates based on I/O and CPU metrics, not precise billing figures.",
-          latestCapturedAt: latestCapture.capturedAt.toISOString(),
-          estimates,
-        });
-      } catch (err) {
-        request.log.error({ err }, "Failed to compute cost estimates");
-        return reply.status(500).send({ error: "Failed to compute cost estimates" });
       }
     }
   );

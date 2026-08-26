@@ -66,8 +66,6 @@ function getNodeStyle(nodeType: string): { border: string; bg: string; icon: str
 
 function formatNumber(n: number | undefined | null): string {
   if (n === undefined || n === null) return "—";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
 }
 

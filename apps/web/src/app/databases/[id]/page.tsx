@@ -369,9 +369,6 @@ export default function DatabaseDetailPage() {
         <Link href={`/databases/${id}/plans`} className="feature-subnav-item">
           🔀 Plan Regressions
         </Link>
-        <Link href={`/databases/${id}/costs`} className="feature-subnav-item">
-          💰 Cost Estimator
-        </Link>
         <Link href={`/databases/${id}/pooler`} className="feature-subnav-item">
           🔌 PgBouncer
         </Link>
@@ -438,7 +435,7 @@ export default function DatabaseDetailPage() {
           value={current}
           icon="🔗"
           color="var(--brand)"
-          subtitle={`of ${max} max`}
+          subtitle={`of ${max.toLocaleString()} max`}
         />
         <StatsCard
           label="Active"
@@ -459,7 +456,7 @@ export default function DatabaseDetailPage() {
           color="var(--signal-warning)"
           subtitle={
             (snap?.idleInTxnAbortedCount ?? 0) > 0
-              ? `${snap?.idleInTxnAbortedCount} aborted`
+              ? `${snap?.idleInTxnAbortedCount.toLocaleString()} aborted`
               : undefined
           }
         />
@@ -472,21 +469,21 @@ export default function DatabaseDetailPage() {
             label="Cache Hit"
             value={
               overview.health.cacheHitRatio != null
-                ? `${(overview.health.cacheHitRatio * 100).toFixed(2)}%`
+                ? `${overview.health.cacheHitRatio.toFixed(2)}%`
                 : "—"
             }
             icon="🎯"
             color={
-              overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 0.99
+              overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 99
                 ? "var(--signal-healthy)"
-                : overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 0.95
+                : overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 95
                   ? "var(--signal-warning)"
                   : "var(--signal-critical)"
             }
             subtitle={
-              overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 0.99
+              overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 99
                 ? "Excellent"
-                : overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 0.95
+                : overview.health.cacheHitRatio != null && overview.health.cacheHitRatio >= 95
                   ? "Acceptable"
                   : "Needs tuning"
             }
@@ -549,13 +546,24 @@ export default function DatabaseDetailPage() {
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            justifyContent: "center",
           }}
         >
-          <div className="section-title" style={{ alignSelf: "flex-start", marginBottom: "var(--space-md)" }}>
+          <div className="section-title" style={{ alignSelf: "flex-start", marginBottom: "var(--space-sm)", width: "100%" }}>
             Connection Utilization
           </div>
-          <ConnectionGauge current={current} max={max} size={200} strokeWidth={12} />
+          <ConnectionGauge
+            current={current}
+            max={max}
+            size={180}
+            strokeWidth={11}
+            breakdown={{
+              active: snap?.activeCount ?? 0,
+              idle: snap?.idleCount ?? 0,
+              idleInTxn: (snap?.idleInTxnCount ?? 0) + (snap?.idleInTxnAbortedCount ?? 0),
+              idleInTxnAborted: snap?.idleInTxnAbortedCount ?? 0,
+            }}
+            showBreakdown={true}
+          />
         </div>
 
         {/* Hints */}
@@ -577,7 +585,7 @@ export default function DatabaseDetailPage() {
                     letterSpacing: 0,
                   }}
                 >
-                  {sortedHints.length}
+                  {sortedHints.length.toLocaleString()}
                 </span>
               )}
             </div>
@@ -769,7 +777,7 @@ export default function DatabaseDetailPage() {
                 letterSpacing: 0,
               }}
             >
-              {sessions.length}
+              {sessions.length.toLocaleString()}
             </span>
           )}
         </div>

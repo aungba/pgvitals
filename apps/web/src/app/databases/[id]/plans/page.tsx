@@ -6,11 +6,11 @@ import Link from "next/link";
 import {
   getDatabase,
   getQueryPlanHistory,
-  getQueryCostEstimates,
+  getQueries,
   getTrackedPlanQueryIds,
   captureExplainPlan,
 } from "../../../lib/api";
-import type { Database, PlanSnapshot, QueryCostEstimate } from "../../../lib/api";
+import type { Database, PlanSnapshot, QueryStat } from "../../../lib/api";
 import PlanTreeVisualizer from "../../../components/PlanTreeVisualizer";
 import PlanListView from "../../../components/PlanListView";
 import { PlanDiffVisualizer } from "../../../components/PlanDiffVisualizer";
@@ -40,8 +40,6 @@ function formatTimestamp(ts: string): string {
 
 function formatNumber(n: number | undefined | null): string {
   if (n === undefined || n === null) return "0";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
 }
 
@@ -60,7 +58,7 @@ export default function PlansPage() {
 
   // Core Data State
   const [database, setDatabase] = useState<Database | null>(null);
-  const [queryList, setQueryList] = useState<QueryCostEstimate[]>([]);
+  const [queryList, setQueryList] = useState<QueryStat[]>([]);
   const [selectedQueryId, setSelectedQueryId] = useState<number | null>(
     preselectedQueryId ? parseInt(preselectedQueryId, 10) : null
   );
@@ -89,9 +87,9 @@ export default function PlansPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [db, costData, tracked] = await Promise.all([
+      const [db, queriesData, tracked] = await Promise.all([
         getDatabase(id),
-        getQueryCostEstimates(id),
+        getQueries(id).catch(() => ({ queries: [], latestCapturedAt: null })),
         getTrackedPlanQueryIds(id).catch(() => []),
       ]);
       setDatabase(db);
@@ -99,10 +97,10 @@ export default function PlansPage() {
       setTrackedIds(trackedSet);
 
       // Deduplicate queries by queryid
-      const queryMap = new Map<number, QueryCostEstimate>();
-      for (const est of costData.estimates) {
-        if (!queryMap.has(est.queryid)) {
-          queryMap.set(est.queryid, est);
+      const queryMap = new Map<number, QueryStat>();
+      for (const q of queriesData.queries) {
+        if (!queryMap.has(q.queryid)) {
+          queryMap.set(q.queryid, q);
         }
       }
 
@@ -451,7 +449,7 @@ export default function PlansPage() {
                       </div>
 
                       <span style={{ fontSize: "0.7rem", color: "var(--brand)", fontWeight: 600 }}>
-                        ${q.estimatedTotalCostPerMonth.toFixed(2)}/mo
+                        {q.pctOfTotalTime != null ? `${q.pctOfTotalTime.toFixed(1)}% time` : `${q.totalTimeMs.toFixed(0)}ms`}
                       </span>
                     </div>
 

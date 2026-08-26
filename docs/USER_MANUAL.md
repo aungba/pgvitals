@@ -52,10 +52,12 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 Located at: `/databases/[id]`
 
-### 2.1 Connection Gauge & Utilization
-- **Radial Gauge**: Displays live active connections vs. `max_connections`.
+### 2.1 Connection Gauge & Utilization Breakdown
+- **Radial Gauge**: Displays live active connections vs. `max_connections` with sub-1% precision indicator (`<1%` when connections exist below 1% of ceiling).
 - **Warning Threshold**: Orange at $\ge 80\%$ utilization; Red at $\ge 90\%$.
-- **Connection Breakdown**: Segregates connections by state: `active`, `idle`, `idle in transaction`, `waiting for locks`.
+- **Composition Distribution Bar**: A multi-segment horizontal bar depicting the visual proportion of `Active` (green), `Idle in Transaction` (amber), and `Idle` (purple) connections.
+- **Detailed State Breakdown**: Displays exact counts and pool percentages for `Active`, `Idle in Transaction` (with alert pill), `Idle`, and `Available Capacity` headroom slots.
+- **Universal Locale Formatting**: All connection numbers and headroom totals feature standard thousands separators (e.g. `3,464`).
 
 ### 2.2 Time-Travel Session Replay
 - Click any point on the **Connection Time-Series Chart** to jump back to that historical snapshot.
@@ -198,10 +200,11 @@ Located at: `/databases/[id]/health`
 
 Located at: `/databases/[id]/logs` and `/databases/[id]/health` (Replication tab)
 
-### 7.1 Deadlock Diagnostics
-- Detects circular lock waits from `pg_stat_database`.
-- Provides lock tree diagnostics and links to concurrent DML write queries.
-- Suggests configuring `log_lock_waits = on` and `deadlock_timeout = '1s'` for deeper engine tracing.
+### 7.1 Deadlock & Rollback Diagnostics
+- **24-Hour Window Delta**: Displays true net-new deadlocks and rollbacks occurring within the selected time range, alongside the cumulative lifetime engine counter.
+- **Initial Baseline Calibration**: New monitored databases establish a clean baseline on first snapshot to avoid false alarms from years of historical lifetime counters.
+- **Lock Tree Diagnostics**: Identifies circular lock waits and provides direct links to concurrent DML write transactions.
+- **Engine Tracing**: Suggests configuring `log_lock_waits = on` and `deadlock_timeout = '1s'` in `postgresql.conf` to stream complete statement graphs to server logs.
 
 ### 7.2 Streaming Replication Lag
 - Queries `pg_stat_replication` in real-time.
@@ -366,6 +369,24 @@ PG Vitals exposes a fully documented REST and Server-Sent Events API powered by 
 - **Strict Production CORS**: Enforces strict origin validation in production environments, matching against configured `ALLOWED_ORIGINS` and `DASHBOARD_BASE_URL`.
 - **Envelope Key Provider Interface**: Implements a pluggable `KeyProvider` architecture supporting versioned key storage (`v1:iv:authTag:ciphertext`) with AWS KMS, GCP KMS, and Vault extensibility.
 - **PII & Comment Sanitization**: SQL text sanitization redacts sensitive credentials in comments (`-- password=...`, `/* token: ... */`), nested JSON payloads, and array literals before storage.
+
+---
+
+## 15. UI/UX Navigation & Usability Enhancements
+
+### 15.1 Sticky Sub-Navigation Bar
+- The database navigation tab bar (`Overview`, `Hints`, `Queries`, `Indexes`, `Health`, `Alerts`, `Logs`, `Plans`, `Schema`, `Pooler`) is permanently pinned to the top of the viewport with a blurred glassmorphic surface (`backdrop-filter: blur(16px)`).
+- Subpage switching is immediately accessible regardless of how far down a table or timeline you scroll.
+
+### 15.2 Sticky Table Headers
+- Long tabular data views (`Active Sessions`, `Query Performance`, `Table Bloat Stats`, `Log Insights`) pin column headers to the top of their scrollable containers.
+- Column headers remain visible when sorting or inspecting hundreds of active connections or table bloat records.
+
+### 15.3 Quick Return-to-Top Floating Button
+- A floating `↑ Top` button appears in the bottom-right corner when scrolled past 350px, providing instant smooth scrolling back to high-level metric cards and performance charts.
+
+### 15.4 Universal Number Formatting
+- Every metric, table count, vacuum frequency, and chart coordinate renders with standardized locale formatting (`1,234,567`) for readability across large database instances.
 
 
 

@@ -216,7 +216,7 @@ export default function SessionGroups({
                   className="alert-table-td"
                   style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}
                 >
-                  {g.total}
+                  {g.total.toLocaleString()}
                 </td>
                 <td
                   className="alert-table-td"
@@ -225,7 +225,7 @@ export default function SessionGroups({
                     color: g.active > 0 ? "var(--signal-healthy)" : "var(--text-muted)",
                   }}
                 >
-                  {g.active}
+                  {g.active.toLocaleString()}
                 </td>
                 <td
                   className="alert-table-td"
@@ -234,7 +234,7 @@ export default function SessionGroups({
                     color: "var(--text-muted)",
                   }}
                 >
-                  {g.idle}
+                  {g.idle.toLocaleString()}
                 </td>
                 <td
                   className="alert-table-td"
@@ -246,7 +246,7 @@ export default function SessionGroups({
                         : "var(--text-muted)",
                   }}
                 >
-                  {g.idleInTxn}
+                  {g.idleInTxn.toLocaleString()}
                 </td>
                 <td className="alert-table-td">
                   <div

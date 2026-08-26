@@ -78,7 +78,14 @@ export default function LogsPage() {
   }, [fetchData]);
 
   // Compute summary stats
+  const earliestStats = errorStats.length > 0 ? errorStats[0] : null;
   const latestStats = errorStats.length > 0 ? errorStats[errorStats.length - 1] : null;
+  const deadlocksDelta = latestStats && earliestStats && latestStats !== earliestStats
+    ? Math.max(0, latestStats.deadlocksCount - earliestStats.deadlocksCount)
+    : 0;
+  const rollbacksDelta = latestStats && earliestStats && latestStats !== earliestStats
+    ? Math.max(0, latestStats.rollbacksCount - earliestStats.rollbacksCount)
+    : 0;
   const warningCount = insights.filter((i) => i.severity === "warning").length;
   const infoCount = insights.filter((i) => i.severity === "info").length;
 
@@ -165,27 +172,37 @@ export default function LogsPage() {
       }}>
         <div className="glass-card-static" style={{ padding: "var(--space-lg)", textAlign: "center" }}>
           <div style={{ fontSize: "2rem", fontWeight: 700, color: warningCount > 0 ? "var(--signal-warning)" : "var(--signal-healthy)" }}>
-            {warningCount}
+            {warningCount.toLocaleString()}
           </div>
           <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>Warnings</div>
         </div>
         <div className="glass-card-static" style={{ padding: "var(--space-lg)", textAlign: "center" }}>
           <div style={{ fontSize: "2rem", fontWeight: 700, color: "var(--brand)" }}>
-            {infoCount}
+            {infoCount.toLocaleString()}
           </div>
           <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>Info Signals</div>
         </div>
         <div className="glass-card-static" style={{ padding: "var(--space-lg)", textAlign: "center" }}>
-          <div style={{ fontSize: "2rem", fontWeight: 700, color: (latestStats?.deadlocksCount ?? 0) > 0 ? "var(--signal-critical)" : "var(--signal-healthy)" }}>
-            {latestStats?.deadlocksCount ?? 0}
+          <div style={{ fontSize: "2rem", fontWeight: 700, color: deadlocksDelta > 0 ? "var(--signal-critical)" : "var(--signal-healthy)" }}>
+            {deadlocksDelta.toLocaleString()}
           </div>
-          <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>Deadlocks (24h)</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>Deadlocks ({hours}h)</div>
+          {latestStats?.deadlocksCount != null && (
+            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2, fontFamily: "var(--font-mono)" }}>
+              {latestStats.deadlocksCount.toLocaleString()} lifetime
+            </div>
+          )}
         </div>
         <div className="glass-card-static" style={{ padding: "var(--space-lg)", textAlign: "center" }}>
           <div style={{ fontSize: "2rem", fontWeight: 700, color: "var(--text-primary)" }}>
-            {latestStats?.rollbacksCount ?? 0}
+            {rollbacksDelta.toLocaleString()}
           </div>
-          <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>Rollbacks (24h)</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>Rollbacks ({hours}h)</div>
+          {latestStats?.rollbacksCount != null && (
+            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2, fontFamily: "var(--font-mono)" }}>
+              {latestStats.rollbacksCount.toLocaleString()} lifetime
+            </div>
+          )}
         </div>
       </div>
 
@@ -288,7 +305,7 @@ export default function LogsPage() {
                           fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: "0.85rem",
                           color: insight.errorCount > 10 ? "var(--signal-critical)" : "var(--text-primary)",
                         }}>
-                          {insight.errorCount}
+                          {insight.errorCount.toLocaleString()}
                         </td>
                         <td className="alert-table-td" style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
                           <div>{dateStr}</div>

@@ -233,7 +233,7 @@ export default function DashboardPage() {
                       className={`alert-badge ${hasCritical ? "alert-badge-critical" : "alert-badge-warning"}`}
                       style={{ marginLeft: 8 }}
                     >
-                      {activeAlerts.length}
+                      {activeAlerts.length.toLocaleString()}
                     </span>
                   )}
                 </div>
@@ -251,11 +251,11 @@ export default function DashboardPage() {
 
               <div className="db-card-meta">
                 <span>
-                  {current} connection{current !== 1 ? "s" : ""}
+                  {current.toLocaleString()} connection{current !== 1 ? "s" : ""}
                 </span>
                 <span style={{ opacity: 0.3 }}>·</span>
                 <span>
-                  {utilization}% utilized
+                  {utilization.toLocaleString()}% utilized
                 </span>
               </div>
             </Link>

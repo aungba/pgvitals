@@ -121,13 +121,16 @@ export async function collectLogInsights(
       const currentTempFiles = parseInt(stats.temp_files, 10) || 0;
       const currentTempBytes = parseFloat(stats.temp_bytes) || 0;
 
-      // Compute deltas (handle counter resets from server restart)
-      const deltaDeadlocks = prev && currentDeadlocks >= prev.deadlocksCount
-        ? currentDeadlocks - prev.deadlocksCount : currentDeadlocks;
-      const deltaConflicts = prev && currentConflicts >= prev.conflictsCount
-        ? currentConflicts - prev.conflictsCount : currentConflicts;
-      const deltaRollbacks = prev && currentRollbacks >= prev.rollbacksCount
-        ? currentRollbacks - prev.rollbacksCount : currentRollbacks;
+      // Compute deltas (handle counter resets from server restart, establish baseline on first run)
+      const deltaDeadlocks = prev
+        ? (currentDeadlocks >= prev.deadlocksCount ? currentDeadlocks - prev.deadlocksCount : currentDeadlocks)
+        : 0;
+      const deltaConflicts = prev
+        ? (currentConflicts >= prev.conflictsCount ? currentConflicts - prev.conflictsCount : currentConflicts)
+        : 0;
+      const deltaRollbacks = prev
+        ? (currentRollbacks >= prev.rollbacksCount ? currentRollbacks - prev.rollbacksCount : currentRollbacks)
+        : 0;
 
       await db.insert(dbErrorStats).values({
         monitoredDbId,

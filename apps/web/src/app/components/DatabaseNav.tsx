@@ -17,7 +17,6 @@ const tabs = [
   { label: "Health", segment: "/health", icon: "💚" },
   { label: "Alerts", segment: "/alerts", icon: "🔔" },
   { label: "Logs", segment: "/logs", icon: "📋" },
-  { label: "Costs", segment: "/costs", icon: "💰" },
   { label: "Plans", segment: "/plans", icon: "📈" },
   { label: "Schema", segment: "/schema", icon: "🏗️" },
   { label: "Pooler", segment: "/pooler", icon: "🔀" },
