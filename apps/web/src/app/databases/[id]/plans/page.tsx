@@ -369,12 +369,14 @@ export default function PlansPage() {
       {/* ── Main Layout: Sidebar (Query List) + Main Panel ── */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "340px 1fr",
+        gridTemplateColumns: "340px minmax(0, 1fr)",
         gap: "var(--space-lg)",
         alignItems: "start",
+        minWidth: 0,
+        maxWidth: "100%",
       }}>
         {/* ── LEFT SIDEBAR: Queries ── */}
-        <div className="glass-card-static" style={{ padding: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+        <div className="glass-card-static" style={{ padding: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-sm)", minWidth: 0 }}>
           {/* Search Input */}
           <div className="table-search-wrap" style={{ width: "100%" }}>
             <span className="table-search-icon">🔍</span>
@@ -473,7 +475,7 @@ export default function PlansPage() {
         </div>
 
         {/* ── RIGHT MAIN PANEL: Plan History & Visualizer ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)", minWidth: 0, maxWidth: "100%", width: "100%" }}>
           {selectedQuery === null ? (
             <div className="glass-card-static" style={{ padding: "var(--space-2xl)", textAlign: "center", color: "var(--text-muted)" }}>
               <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-md)" }}>📋</div>
@@ -665,7 +667,7 @@ export default function PlansPage() {
               )}
 
               {/* ── Visualizer Content Area ── */}
-              <div className="glass-card-static" style={{ padding: "var(--space-lg)" }}>
+              <div className="glass-card-static" style={{ padding: "var(--space-lg)", minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
                 {plansLoading ? (
                   <div className="skeleton" style={{ height: 260, borderRadius: "var(--radius-md)" }} />
                 ) : plans.length === 0 ? (

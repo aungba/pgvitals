@@ -158,11 +158,13 @@ export function PlanDiffVisualizer({
       {/* ── Side-by-Side Dual-Column Trees ── */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "1fr 1fr",
+        gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
         gap: "var(--space-md)",
+        minWidth: 0,
+        maxWidth: "100%",
       }}>
         {/* Left: Baseline Plan */}
-        <div className="glass-card-static" style={{ padding: "var(--space-md)", overflowX: "auto" }}>
+        <div className="glass-card-static" style={{ padding: "var(--space-md)", overflowX: "auto", minWidth: 0 }}>
           <div style={{
             display: "flex", justifyContent: "space-between", alignItems: "center",
             paddingBottom: "var(--space-sm)", borderBottom: "1px solid var(--border)", marginBottom: "var(--space-md)",
@@ -215,7 +217,7 @@ export function PlanDiffVisualizer({
         </div>
 
         {/* Right: Current Plan */}
-        <div className="glass-card-static" style={{ padding: "var(--space-md)", overflowX: "auto" }}>
+        <div className="glass-card-static" style={{ padding: "var(--space-md)", overflowX: "auto", minWidth: 0 }}>
           <div style={{
             display: "flex", justifyContent: "space-between", alignItems: "center",
             paddingBottom: "var(--space-sm)", borderBottom: "1px solid var(--border)", marginBottom: "var(--space-md)",

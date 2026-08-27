@@ -325,11 +325,42 @@ const TreeNode: React.FC<{
   );
 };
 
+/* ---------- Helper to collect all node IDs ---------- */
+
+function collectAllNodeIds(node: PlanNode, id = "0"): string[] {
+  const ids: string[] = [];
+  if (node.Plans && node.Plans.length > 0) {
+    ids.push(id);
+    node.Plans.forEach((child, i) => {
+      ids.push(...collectAllNodeIds(child, `${id}-${i}`));
+    });
+  }
+  return ids;
+}
+
+function countTotalNodes(node: PlanNode): number {
+  let count = 1;
+  if (node.Plans) {
+    node.Plans.forEach((child) => {
+      count += countTotalNodes(child);
+    });
+  }
+  return count;
+}
+
 /* ---------- Main Visualizer ---------- */
 
 export default function PlanTreeVisualizer({ plan }: PlanTreeVisualizerProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [zoom, setZoom] = useState<number>(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number }>({
+    x: 0,
+    y: 0,
+    scrollLeft: 0,
+    scrollTop: 0,
+  });
 
   // Resolve root node
   const rootNode: PlanNode | null = useMemo(() => {
@@ -344,6 +375,8 @@ export default function PlanTreeVisualizer({ plan }: PlanTreeVisualizerProps) {
   }, [plan]);
 
   const rootCost = rootNode?.["Total Cost"] ?? 1;
+  const totalNodesCount = useMemo(() => rootNode ? countTotalNodes(rootNode) : 0, [rootNode]);
+  const allCollapsibleIds = useMemo(() => rootNode ? collectAllNodeIds(rootNode, "0") : [], [rootNode]);
 
   const onToggle = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -353,6 +386,78 @@ export default function PlanTreeVisualizer({ plan }: PlanTreeVisualizerProps) {
       return next;
     });
   }, []);
+
+  const handleExpandAll = useCallback(() => {
+    setCollapsed(new Set());
+  }, []);
+
+  const handleCollapseAll = useCallback(() => {
+    setCollapsed(new Set(allCollapsibleIds));
+  }, [allCollapsibleIds]);
+
+  const handleZoomIn = useCallback(() => {
+    setZoom((z) => Math.min(Number((z + 0.15).toFixed(2)), 2.0));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setZoom((z) => Math.max(Number((z - 0.15).toFixed(2)), 0.35));
+  }, []);
+
+  const handleResetZoom = useCallback(() => {
+    setZoom(1);
+  }, []);
+
+  // Calculate dimensions
+  const treeSize = useMemo(() => {
+    if (!rootNode) return { width: NODE_W, height: NODE_H };
+    return measureTree(rootNode, collapsed, "0");
+  }, [rootNode, collapsed]);
+
+  const totalWidth = treeSize.width + 80;
+  const totalHeight = treeSize.height + 60;
+
+  const handleFitToView = useCallback(() => {
+    if (!containerRef.current) return;
+    const availableWidth = containerRef.current.clientWidth - 40;
+    if (availableWidth > 0 && totalWidth > 0) {
+      const calculatedZoom = Math.min(1, Math.max(0.35, Number((availableWidth / totalWidth).toFixed(2))));
+      setZoom(calculatedZoom);
+      containerRef.current.scrollLeft = 0;
+      containerRef.current.scrollTop = 0;
+    }
+  }, [totalWidth]);
+
+  // Pan / Drag handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Only start drag if clicking on the background container (not interactive card elements)
+    const target = e.target as HTMLElement;
+    if (target.closest("button") || target.closest("input") || target.closest("select")) {
+      return;
+    }
+    if (!containerRef.current) return;
+    setIsPanning(true);
+    panStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      scrollLeft: containerRef.current.scrollLeft,
+      scrollTop: containerRef.current.scrollTop,
+    };
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isPanning || !containerRef.current) return;
+    e.preventDefault();
+    const dx = e.clientX - panStartRef.current.x;
+    const dy = e.clientY - panStartRef.current.y;
+    containerRef.current.scrollLeft = panStartRef.current.scrollLeft - dx;
+    containerRef.current.scrollTop = panStartRef.current.scrollTop - dy;
+  }, [isPanning]);
+
+  const handleMouseUpOrLeave = useCallback(() => {
+    if (isPanning) {
+      setIsPanning(false);
+    }
+  }, [isPanning]);
 
   if (!rootNode) {
     return (
@@ -365,60 +470,179 @@ export default function PlanTreeVisualizer({ plan }: PlanTreeVisualizerProps) {
     );
   }
 
-  // Calculate dimensions and collect SVG lines
-  const treeSize = measureTree(rootNode, collapsed, "0");
   const svgLines: Array<{ x1: number; y1: number; x2: number; y2: number; color: string }> = [];
 
-  const totalWidth = treeSize.width + 40;
-  const totalHeight = treeSize.height + 40;
-
   return (
-    <div
-      ref={containerRef}
-      style={{
-        overflow: "auto",
-        borderRadius: "var(--radius-md)",
-        border: "1px solid var(--border)",
-        background: "var(--bg)",
-        padding: 20,
-      }}
-    >
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)", width: "100%", maxWidth: "100%" }}>
+      {/* ── Visualizer Toolbar ── */}
       <div style={{
-        position: "relative",
-        width: totalWidth,
-        height: totalHeight,
-        minWidth: "100%",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: "var(--space-sm)", flexWrap: "wrap", padding: "6px 12px",
+        background: "var(--surface-alt)", borderRadius: "var(--radius-md)",
+        border: "1px solid var(--border)", fontSize: "0.75rem",
       }}>
-        {/* SVG layer for connector lines */}
-        <svg
-          width={totalWidth}
-          height={totalHeight}
-          style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
-        >
-          <defs>
-            <filter id="glow">
-              <feGaussianBlur stdDeviation="2" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          {/* Render connector lines - we need to re-traverse to get them */}
-          <ConnectorLines rootNode={rootNode} collapsed={collapsed} offsetX={20} offsetY={20} />
-        </svg>
+        {/* Left: Info stats */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, color: "var(--text-secondary)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontWeight: 600 }}>
+            <span>🌳</span>
+            <span>{totalNodesCount} Nodes</span>
+          </span>
+          <span style={{ color: "var(--border)" }}>|</span>
+          <span>Max Cost: <strong style={{ color: "var(--text-primary)" }}>{rootCost.toLocaleString(undefined, { maximumFractionDigits: 1 })}</strong></span>
+        </div>
 
-        {/* Node cards layer */}
-        <TreeNode
-          node={rootNode}
-          rootCost={rootCost}
-          nodeId="0"
-          collapsed={collapsed}
-          onToggle={onToggle}
-          svgLines={svgLines}
-          offsetX={20}
-          offsetY={20}
-        />
+        {/* Right: Actions (Expand/Collapse, Zoom, Fit) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {/* Expand / Collapse all */}
+          <div style={{ display: "inline-flex", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", overflow: "hidden" }}>
+            <button
+              onClick={handleExpandAll}
+              style={{
+                padding: "3px 8px", fontSize: "0.7rem", background: "var(--surface)",
+                color: "var(--text-secondary)", borderRight: "1px solid var(--border)", cursor: "pointer",
+              }}
+              title="Expand all nodes"
+            >
+              ⊞ Expand All
+            </button>
+            <button
+              onClick={handleCollapseAll}
+              style={{
+                padding: "3px 8px", fontSize: "0.7rem", background: "var(--surface)",
+                color: "var(--text-secondary)", cursor: "pointer",
+              }}
+              title="Collapse all child nodes"
+            >
+              ⊟ Collapse All
+            </button>
+          </div>
+
+          {/* Zoom controls */}
+          <div style={{ display: "inline-flex", alignItems: "center", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", overflow: "hidden", background: "var(--surface)" }}>
+            <button
+              onClick={handleZoomOut}
+              disabled={zoom <= 0.35}
+              style={{
+                padding: "3px 8px", fontSize: "0.8rem", fontWeight: 700,
+                background: "transparent", borderRight: "1px solid var(--border)",
+                color: zoom <= 0.35 ? "var(--text-muted)" : "var(--text-primary)",
+                cursor: zoom <= 0.35 ? "not-allowed" : "pointer",
+              }}
+              title="Zoom out"
+            >
+              −
+            </button>
+            <button
+              onClick={handleResetZoom}
+              style={{
+                padding: "3px 8px", fontSize: "0.7rem", fontWeight: 600,
+                background: "transparent", borderRight: "1px solid var(--border)",
+                color: "var(--text-secondary)", minWidth: 44, textAlign: "center", cursor: "pointer",
+              }}
+              title="Reset zoom to 100%"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              onClick={handleZoomIn}
+              disabled={zoom >= 2.0}
+              style={{
+                padding: "3px 8px", fontSize: "0.8rem", fontWeight: 700,
+                background: "transparent", borderRight: "1px solid var(--border)",
+                color: zoom >= 2.0 ? "var(--text-muted)" : "var(--text-primary)",
+                cursor: zoom >= 2.0 ? "not-allowed" : "pointer",
+              }}
+              title="Zoom in"
+            >
+              +
+            </button>
+            <button
+              onClick={handleFitToView}
+              style={{
+                padding: "3px 8px", fontSize: "0.7rem", fontWeight: 600,
+                background: "transparent", color: "var(--brand)", cursor: "pointer",
+              }}
+              title="Fit tree width to container"
+            >
+              ⛶ Fit
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Scrollable / Pannable Tree Canvas ── */}
+      <div
+        ref={containerRef}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUpOrLeave}
+        onMouseLeave={handleMouseUpOrLeave}
+        style={{
+          overflowX: "auto",
+          overflowY: "auto",
+          maxWidth: "100%",
+          width: "100%",
+          maxHeight: "72vh",
+          minHeight: 420,
+          borderRadius: "var(--radius-md)",
+          border: "1px solid var(--border)",
+          background: "radial-gradient(ellipse at 50% 50%, var(--surface-alt) 0%, var(--bg) 100%)",
+          padding: 24,
+          position: "relative",
+          cursor: isPanning ? "grabbing" : "grab",
+          userSelect: isPanning ? "none" : "auto",
+          boxSizing: "border-box",
+        }}
+      >
+        {/* Scaled wrapper to enable natural scroll area calculation */}
+        <div style={{
+          width: totalWidth * zoom,
+          height: totalHeight * zoom,
+          minWidth: "100%",
+          position: "relative",
+        }}>
+          <div style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: totalWidth,
+            height: totalHeight,
+            transform: `scale(${zoom})`,
+            transformOrigin: "0 0",
+            transition: isPanning ? "none" : "transform 0.15s ease-out",
+          }}>
+            {/* SVG layer for connector lines */}
+            <svg
+              width={totalWidth}
+              height={totalHeight}
+              style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
+            >
+              <defs>
+                <filter id="glow">
+                  <feGaussianBlur stdDeviation="2" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+              {/* Render connector lines */}
+              <ConnectorLines rootNode={rootNode} collapsed={collapsed} offsetX={30} offsetY={20} />
+            </svg>
+
+            {/* Node cards layer */}
+            <TreeNode
+              node={rootNode}
+              rootCost={rootCost}
+              nodeId="0"
+              collapsed={collapsed}
+              onToggle={onToggle}
+              svgLines={svgLines}
+              offsetX={30}
+              offsetY={20}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
