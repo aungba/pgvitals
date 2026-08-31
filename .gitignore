@@ -25,11 +25,16 @@ Thumbs.db
 *.log
 /logs/
 
-# Coverage
+# Coverage & Temporary
 coverage/
 *.tsbuildinfo
-jenkins_deploy_log.txt
 .pnpm-store/
 db_err
+test.sql
+deplo.txt
+deploy.txt
+jenkins_deploy_log.txt
+*.png
+
 
 

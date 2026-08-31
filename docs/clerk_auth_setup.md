@@ -64,14 +64,14 @@ Your codebase has all the pieces in place — no code changes needed:
 
 | Component | File | Status |
 |-----------|------|--------|
-| **Clerk Provider** | [`layout.tsx`](file:///Users/aungba/personal/pgvitals/apps/web/src/app/layout.tsx#L14-L19) | ✅ Wraps app when keys are set |
-| **Sign-in page** | [`sign-in/[[...sign-in]]/`](file:///Users/aungba/personal/pgvitals/apps/web/src/app/sign-in) | ✅ Exists |
-| **Route protection** | [`middleware.ts`](file:///Users/aungba/personal/pgvitals/apps/web/src/middleware.ts) | ✅ Protects all routes except `/sign-in`, `/sign-up` |
-| **JWT verification** | [`auth.ts`](file:///Users/aungba/personal/pgvitals/apps/collector/src/middleware/auth.ts) | ✅ Verifies Bearer tokens from Clerk |
-| **User sync** | [`auth.ts`](file:///Users/aungba/personal/pgvitals/apps/collector/src/middleware/auth.ts#L102-L184) | ✅ Auto-creates user + org on first login |
+| **Clerk Provider** | [`apps/web/src/app/layout.tsx`](../apps/web/src/app/layout.tsx) | ✅ Wraps app when keys are set |
+| **Sign-in page** | [`apps/web/src/app/sign-in/`](../apps/web/src/app/sign-in) | ✅ Exists |
+| **Route protection** | [`apps/web/src/middleware.ts`](../apps/web/src/middleware.ts) | ✅ Protects all routes except `/sign-in`, `/sign-up` |
+| **JWT verification** | [`apps/collector/src/middleware/auth.ts`](../apps/collector/src/middleware/auth.ts) | ✅ Verifies Bearer tokens from Clerk |
+| **User sync** | [`apps/collector/src/middleware/auth.ts`](../apps/collector/src/middleware/auth.ts) | ✅ Auto-creates user + org on first login |
 | **Org isolation** | All routes | ✅ Databases are scoped to `orgId` |
-| **Role schema** | [`organizations.ts`](file:///Users/aungba/personal/pgvitals/packages/db/src/schema/organizations.ts#L23-L36) | ✅ `owner`/`admin`/`member` roles in DB |
-| **Plan tier gating** | [`plan-limits.ts`](file:///Users/aungba/personal/pgvitals/apps/collector/src/middleware/plan-limits.ts) | ✅ Feature gates per plan tier |
+| **Role schema** | [`packages/db/src/schema/organizations.ts`](../packages/db/src/schema/organizations.ts) | ✅ `owner`/`admin`/`member` roles in DB |
+| **Plan tier gating** | [`apps/collector/src/middleware/plan-limits.ts`](../apps/collector/src/middleware/plan-limits.ts) | ✅ Feature gates per plan tier |
 
 ### Auth flow diagram
 
@@ -121,7 +121,7 @@ Then:
 
 ## 6. UAT Test Accounts
 
-To create multiple test accounts for UAT (as per the [UAT_TEST_PLAN.md](file:///Users/aungba/personal/pgvitals/specs/UAT_TEST_PLAN.md)):
+To create multiple test accounts for UAT (as per the [UAT_TEST_PLAN.md](../specs/UAT_TEST_PLAN.md)):
 
 ### Option A: Use Clerk Dashboard
 
