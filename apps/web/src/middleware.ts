@@ -7,6 +7,12 @@ const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 const isPublicRoute = createRouteMatcher([
   "/",
   "/landing",
+  "/quickstart(.*)",
+  "/faq(.*)",
+  "/docs(.*)",
+  "/privacy(.*)",
+  "/terms(.*)",
+  "/security(.*)",
   "/sign-in(.*)",
   "/sign-up(.*)",
 ]);

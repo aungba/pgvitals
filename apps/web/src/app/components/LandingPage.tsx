@@ -94,10 +94,10 @@ GRANT SELECT ON pg_stat_statements TO pgvitals_monitor;`;
 
           <nav className="landing-nav-links">
             <a href="#features" className="landing-nav-link">Features</a>
-            <a href="#preview" className="landing-nav-link">Live Preview</a>
-            <a href="#security" className="landing-nav-link">Security</a>
+            <Link href="/quickstart" className="landing-nav-link">Quickstart</Link>
+            <Link href="/faq" className="landing-nav-link">FAQ</Link>
+            <Link href="/docs" className="landing-nav-link">Documentation</Link>
             <a href="#pricing" className="landing-nav-link">Pricing</a>
-            <a href="#faq" className="landing-nav-link">FAQ</a>
           </nav>
 
           <div className="landing-nav-actions">
@@ -674,19 +674,19 @@ WHERE deleted_at IS NULL;`}</code>
               <a href="#features">Features</a>
               <a href="#preview">Live Demo</a>
               <a href="#pricing">Pricing</a>
-              <a href="#security">Security</a>
+              <Link href="/security">Security</Link>
             </div>
             <div className="footer-col">
               <h4>Resources</h4>
-              <a href="#how-it-works">Quickstart Guide</a>
-              <a href="#faq">FAQ</a>
-              <a href="https://github.com" target="_blank" rel="noreferrer">Documentation</a>
+              <Link href="/quickstart">Quickstart Guide</Link>
+              <Link href="/faq">FAQ</Link>
+              <Link href="/docs">Documentation</Link>
             </div>
             <div className="footer-col">
               <h4>Legal</h4>
-              <a href="#">Privacy Policy</a>
-              <a href="#">Terms of Service</a>
-              <a href="#">Security Overview</a>
+              <Link href="/privacy">Privacy Policy</Link>
+              <Link href="/terms">Terms of Service</Link>
+              <Link href="/security">Security Overview</Link>
             </div>
           </div>
         </div>

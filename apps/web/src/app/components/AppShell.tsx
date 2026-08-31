@@ -19,6 +19,12 @@ export default function AppShell({ children }: AppShellProps) {
   // Public/marketing or standalone routes that should not display the dashboard sidebar
   const isStandaloneRoute =
     pathname === "/landing" ||
+    pathname?.startsWith("/quickstart") ||
+    pathname?.startsWith("/faq") ||
+    pathname?.startsWith("/docs") ||
+    pathname?.startsWith("/privacy") ||
+    pathname?.startsWith("/terms") ||
+    pathname?.startsWith("/security") ||
     pathname?.startsWith("/sign-in") ||
     pathname?.startsWith("/sign-up") ||
     (pathname === "/" && clerkEnabled && !isSignedIn);
