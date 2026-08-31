@@ -4,31 +4,24 @@ import React, { useState } from "react";
 import Link from "next/link";
 import PublicNav from "../components/PublicNav";
 import PublicFooter from "../components/PublicFooter";
+import CodeCard from "../components/CodeCard";
 
 export default function QuickstartPage() {
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  const copyCode = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const modernSql = `-- 1. Create a dedicated read-only monitoring user
+  const modernSql = `-- 1. Create a dedicated monitoring user with connection ceiling
 CREATE USER pgvitals_monitor WITH PASSWORD 'choose_a_strong_password' CONNECTION LIMIT 5;
 
--- 2. Grant statistics and catalog inspection permissions (PostgreSQL 14, 15, 16, 17, 18+)
+-- 2. Grant statistics and catalog read permissions (PostgreSQL 14+)
 GRANT CONNECT ON DATABASE your_database TO pgvitals_monitor;
 GRANT pg_read_all_stats TO pgvitals_monitor;
 GRANT pg_read_all_data TO pgvitals_monitor;
 
--- 3. Enable query performance tracking (recommended)
+-- 3. Enable statement-level query tracking (recommended)
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 -- 4. (Optional) Enable zero-risk hypothetical index simulation
 CREATE EXTENSION IF NOT EXISTS hypopg;`;
 
-  const legacySql = `-- 1. Create a dedicated read-only monitoring user
+  const legacySql = `-- 1. Create a dedicated monitoring user with connection ceiling
 CREATE USER pgvitals_monitor WITH PASSWORD 'choose_a_strong_password' CONNECTION LIMIT 5;
 
 -- 2. Grant permissions for PostgreSQL 10, 11, 12, 13
@@ -72,41 +65,22 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;`;
             </div>
           </div>
 
-          {/* Code block Modern */}
-          <div className="docs-code-card">
-            <div className="docs-code-header">
-              <div className="docs-code-dots"><span /><span /><span /></div>
-              <span>SQL · PostgreSQL 14, 15, 16, 17, 18+</span>
-              <button
-                onClick={() => copyCode(modernSql, "sql-modern")}
-                className="docs-copy-btn"
-              >
-                {copiedId === "sql-modern" ? "✓ Copied" : "Copy SQL"}
-              </button>
-            </div>
-            <pre className="docs-code-content">
-              <code>{modernSql}</code>
-            </pre>
-          </div>
+          <CodeCard
+            code={modernSql}
+            language="sql"
+            title="SQL · PostgreSQL 14, 15, 16, 17, 18+"
+          />
 
-          <details style={{ marginTop: 14 }}>
+          <details style={{ marginTop: 12 }}>
             <summary style={{ cursor: "pointer", fontSize: "0.88rem", color: "var(--brand)", fontWeight: 600 }}>
               Need SQL for PostgreSQL 10–13 Legacy?
             </summary>
-            <div className="docs-code-card" style={{ marginTop: 12 }}>
-              <div className="docs-code-header">
-                <div className="docs-code-dots"><span /><span /><span /></div>
-                <span>SQL · PostgreSQL 10–13</span>
-                <button
-                  onClick={() => copyCode(legacySql, "sql-legacy")}
-                  className="docs-copy-btn"
-                >
-                  {copiedId === "sql-legacy" ? "✓ Copied" : "Copy SQL"}
-                </button>
-              </div>
-              <pre className="docs-code-content">
-                <code>{legacySql}</code>
-              </pre>
+            <div style={{ marginTop: 10 }}>
+              <CodeCard
+                code={legacySql}
+                language="sql"
+                title="SQL · PostgreSQL 10, 11, 12, 13"
+              />
             </div>
           </details>
 
@@ -134,20 +108,12 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;`;
             <li>Open the PG Vitals dashboard and click <strong>"Add Database"</strong>.</li>
             <li>Give your database a name (e.g. <code>Production Primary</code>) and select an environment tag.</li>
             <li>Paste your standard PostgreSQL connection URI:
-              <div className="docs-code-card" style={{ margin: "10px 0" }}>
-                <div className="docs-code-header">
-                  <div className="docs-code-dots"><span /><span /><span /></div>
-                  <span>URI Format</span>
-                  <button
-                    onClick={() => copyCode(`postgresql://pgvitals_monitor:your_password@db.example.com:5432/your_database?sslmode=require`, "uri-example")}
-                    className="docs-copy-btn"
-                  >
-                    {copiedId === "uri-example" ? "✓ Copied" : "Copy URI"}
-                  </button>
-                </div>
-                <pre className="docs-code-content">
-                  <code>postgresql://pgvitals_monitor:your_password@db.example.com:5432/your_database?sslmode=require</code>
-                </pre>
+              <div style={{ margin: "8px 0" }}>
+                <CodeCard
+                  code="postgresql://pgvitals_monitor:your_password@db.example.com:5432/your_database?sslmode=require"
+                  language="uri"
+                  title="Connection URI Format"
+                />
               </div>
             </li>
             <li>Click <strong>"Test Connection"</strong> to verify latency and extension availability.</li>

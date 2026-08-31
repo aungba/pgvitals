@@ -3505,7 +3505,7 @@ h4 { font-size: 1.1rem; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 20px 14px;
+  padding: 18px 12px;
   max-height: calc(100vh - 110px);
   overflow-y: auto;
   box-shadow: var(--shadow-sm);
@@ -3513,13 +3513,14 @@ h4 { font-size: 1.1rem; }
 
 .docs-search-wrap {
   position: relative;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
+  padding: 0 4px;
 }
 
 .docs-search-input {
   width: 100%;
-  padding: 10px 14px 10px 36px;
-  font-size: 0.85rem;
+  padding: 9px 12px 9px 34px;
+  font-size: 0.86rem;
   border-radius: 8px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
@@ -3536,26 +3537,27 @@ h4 { font-size: 1.1rem; }
 
 .docs-search-icon {
   position: absolute;
-  left: 12px;
+  left: 14px;
   top: 50%;
   transform: translateY(-50%);
   font-size: 0.85rem;
-  opacity: 0.5;
+  opacity: 0.55;
   pointer-events: none;
 }
 
 .docs-nav-group {
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .docs-nav-group-title {
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 700;
   color: var(--text-muted);
-  padding: 6px 12px;
-  margin-bottom: 4px;
+  padding: 6px 10px 4px;
+  margin-top: 14px;
+  margin-bottom: 2px;
 }
 
 .docs-nav-item {
@@ -3564,38 +3566,34 @@ h4 { font-size: 1.1rem; }
   gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 8px 12px;
-  font-size: 0.88rem;
+  padding: 7px 12px;
+  font-size: 0.89rem;
   border-radius: 8px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   border: none;
   background: transparent;
   cursor: pointer;
   transition: all var(--transition-fast);
-  position: relative;
-  font-weight: 400;
+  font-weight: 450;
+  opacity: 0.82;
 }
 
 .docs-nav-item:hover {
   background: var(--surface-alt);
-  color: var(--text-primary);
+  color: var(--brand);
+  opacity: 1;
 }
 
 .docs-nav-item.active {
-  background: var(--brand-dim);
-  color: var(--brand);
+  background: rgba(99, 102, 241, 0.09);
+  color: var(--brand-strong);
   font-weight: 600;
+  opacity: 1;
 }
 
-.docs-nav-item.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  background: var(--brand);
-  border-radius: 0 4px 4px 0;
+[data-theme="dark"] .docs-nav-item.active {
+  background: rgba(99, 102, 241, 0.18);
+  color: #A5B4FC;
 }
 
 /* Docs Article Container */
@@ -3664,8 +3662,8 @@ h4 { font-size: 1.1rem; }
 
 /* Inline Code Badge */
 .docs-code-inline, .docs-article code:not(pre code) {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.85em;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.86em;
   padding: 2px 7px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
@@ -3676,29 +3674,29 @@ h4 { font-size: 1.1rem; }
 
 [data-theme="dark"] .docs-code-inline, [data-theme="dark"] .docs-article code:not(pre code) {
   color: #A5B4FC;
-  background: rgba(99, 102, 241, 0.12);
-  border-color: rgba(99, 102, 241, 0.25);
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.28);
 }
 
 /* Code Blocks with Header Bar */
 .docs-code-card {
   position: relative;
-  background: #0F172A;
-  border: 1px solid #1E293B;
+  background: #0B1120;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  margin: 20px 0 24px;
+  margin: 18px 0 24px;
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.16);
 }
 
 .docs-code-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
-  background: #1E293B;
-  border-bottom: 1px solid #334155;
-  font-size: 0.78rem;
+  padding: 9px 16px;
+  background: #111827;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.80rem;
   color: #94A3B8;
   font-family: "JetBrains Mono", monospace;
 }
@@ -3720,12 +3718,12 @@ h4 { font-size: 1.1rem; }
 .docs-code-dots span:nth-child(3) { background: #10B981; }
 
 .docs-code-content {
-  padding: 18px 20px;
+  padding: 18px 22px;
   margin: 0;
   overflow-x: auto;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.88rem;
-  line-height: 1.65;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.92rem;
+  line-height: 1.75;
   color: #E2E8F0;
   background: transparent;
 }
@@ -3735,18 +3733,19 @@ h4 { font-size: 1.1rem; }
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   font-weight: 500;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   color: #F8FAFC;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .docs-copy-btn:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
 /* Callout Boxes */

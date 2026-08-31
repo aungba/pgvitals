@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import PublicNav from "../components/PublicNav";
 import PublicFooter from "../components/PublicFooter";
+import CodeCard from "../components/CodeCard";
 
 interface DocSection {
   id: string;
@@ -16,13 +17,33 @@ interface DocSection {
 export default function DocsPage() {
   const [activeSection, setActiveSection] = useState("onboarding");
   const [searchQuery, setSearchQuery] = useState("");
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const copyCode = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
+  const sqlModernOnboarding = `-- 1. Create a dedicated monitoring user with connection ceiling
+CREATE USER pgvitals_monitor WITH PASSWORD 'choose_a_strong_password' CONNECTION LIMIT 5;
+
+-- 2. Grant statistics and catalog read permissions
+GRANT CONNECT ON DATABASE your_database TO pgvitals_monitor;
+GRANT pg_read_all_stats TO pgvitals_monitor;
+GRANT pg_read_all_data TO pgvitals_monitor;
+
+-- 3. Enable statement-level query tracking (strongly recommended)
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+-- 4. (Optional) Enable zero-risk hypothetical index simulation
+CREATE EXTENSION IF NOT EXISTS hypopg;`;
+
+  const sqlLegacyOnboarding = `-- 1. Create a dedicated monitoring user with connection ceiling
+CREATE USER pgvitals_monitor WITH PASSWORD 'choose_a_strong_password' CONNECTION LIMIT 5;
+
+-- 2. Grant permissions for PostgreSQL 10, 11, 12, 13
+GRANT CONNECT ON DATABASE your_database TO pgvitals_monitor;
+GRANT pg_read_all_stats TO pgvitals_monitor;
+GRANT USAGE ON SCHEMA public TO pgvitals_monitor;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO pgvitals_monitor;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO pgvitals_monitor;
+
+-- 3. Enable statement-level query tracking
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;`;
 
   const sections: DocSection[] = [
     {
@@ -40,45 +61,29 @@ export default function DocsPage() {
           <h3>1. Create the Read-Only Monitoring Role</h3>
           <p>Connect to your PostgreSQL database with administrative privileges and execute the setup script:</p>
 
-          <div className="docs-code-card">
-            <div className="docs-code-header">
-              <div className="docs-code-dots">
-                <span /><span /><span />
-              </div>
-              <span>SQL · PostgreSQL 14, 15, 16, 17, 18+</span>
-              <button
-                onClick={() =>
-                  copyCode(
-                    `-- Create monitoring user with 5-connection limit\nCREATE USER pgvitals_monitor WITH PASSWORD 'choose_a_strong_password' CONNECTION LIMIT 5;\n\n-- Grant catalog inspection privileges\nGRANT CONNECT ON DATABASE your_database TO pgvitals_monitor;\nGRANT pg_read_all_stats TO pgvitals_monitor;\nGRANT pg_read_all_data TO pgvitals_monitor;\n\n-- Enable query performance tracking\nCREATE EXTENSION IF NOT EXISTS pg_stat_statements;\n\n-- (Optional) Enable zero-risk hypothetical index simulation\nCREATE EXTENSION IF NOT EXISTS hypopg;`,
-                    "sql-onboarding"
-                  )
-                }
-                className="docs-copy-btn"
-              >
-                {copiedId === "sql-onboarding" ? "✓ Copied" : "Copy SQL"}
-              </button>
+          <CodeCard
+            code={sqlModernOnboarding}
+            language="sql"
+            title="SQL · PostgreSQL 14, 15, 16, 17, 18+"
+          />
+
+          <details style={{ marginTop: 12, marginBottom: 20 }}>
+            <summary style={{ cursor: "pointer", fontSize: "0.88rem", color: "var(--brand)", fontWeight: 600 }}>
+              Need SQL script for PostgreSQL 10–13 Legacy?
+            </summary>
+            <div style={{ marginTop: 10 }}>
+              <CodeCard
+                code={sqlLegacyOnboarding}
+                language="sql"
+                title="SQL · PostgreSQL 10, 11, 12, 13"
+              />
             </div>
-            <pre className="docs-code-content">
-              <code>{`-- 1. Create a dedicated monitoring user with connection ceiling
-CREATE USER pgvitals_monitor WITH PASSWORD 'choose_a_strong_password' CONNECTION LIMIT 5;
-
--- 2. Grant statistics and catalog read permissions
-GRANT CONNECT ON DATABASE your_database TO pgvitals_monitor;
-GRANT pg_read_all_stats TO pgvitals_monitor;
-GRANT pg_read_all_data TO pgvitals_monitor;
-
--- 3. Enable statement-level query tracking (strongly recommended)
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-
--- 4. (Optional) Enable zero-risk hypothetical index simulation
-CREATE EXTENSION IF NOT EXISTS hypopg;`}</code>
-            </pre>
-          </div>
+          </details>
 
           <div className="docs-callout docs-callout-info">
-            <div className="docs-callout-icon">💡</div>
+            <div className="docs-callout-icon">🛡️</div>
             <div>
-              <strong>For PostgreSQL 10–13 Legacy:</strong> Grant <code>GRANT USAGE ON SCHEMA public TO pgvitals_monitor;</code> and <code>GRANT SELECT ON ALL TABLES IN SCHEMA public TO pgvitals_monitor;</code> instead of <code>pg_read_all_data</code>.
+              <strong>Zero Customer Data Access:</strong> The <code>pg_read_all_stats</code> role only grants visibility into PostgreSQL engine catalogs (<code>pg_stat_activity</code>, <code>pg_stat_statements</code>, <code>pg_locks</code>). PG Vitals never selects or reads your customer table data.
             </div>
           </div>
 
@@ -88,7 +93,11 @@ CREATE EXTENSION IF NOT EXISTS hypopg;`}</code>
             <li>Give your database a recognizable name (e.g. <code>Production US-East</code>) and assign an environment tag (<code>production</code>, <code>staging</code>, <code>development</code>).</li>
             <li>Paste your standard PostgreSQL connection URI:
               <div style={{ marginTop: 8, marginBottom: 8 }}>
-                <code>postgresql://pgvitals_monitor:password@db.example.com:5432/your_db?sslmode=require</code>
+                <CodeCard
+                  code="postgresql://pgvitals_monitor:your_password@db.example.com:5432/your_database?sslmode=require"
+                  language="uri"
+                  title="Connection URI Format"
+                />
               </div>
             </li>
             <li>Click <strong>Test Connection</strong> to verify network connectivity, latency, and extension availability.</li>
@@ -120,21 +129,11 @@ CREATE EXTENSION IF NOT EXISTS hypopg;`}</code>
             When queries wait on exclusive table or row locks, PG Vitals isolates the <strong>Root Blocker session ID (PID)</strong> causing the cascading lock queue. The UI displays the culprit query, elapsed duration, and a 1-click copyable termination command:
           </p>
 
-          <div className="docs-code-card">
-            <div className="docs-code-header">
-              <div className="docs-code-dots"><span /><span /><span /></div>
-              <span>SQL · Blocker Session Cancellation</span>
-              <button
-                onClick={() => copyCode(`SELECT pg_terminate_backend(blocking_pid);`, "sql-term-session")}
-                className="docs-copy-btn"
-              >
-                {copiedId === "sql-term-session" ? "✓ Copied" : "Copy SQL"}
-              </button>
-            </div>
-            <pre className="docs-code-content">
-              <code>SELECT pg_terminate_backend(blocking_pid);</code>
-            </pre>
-          </div>
+          <CodeCard
+            code="SELECT pg_terminate_backend(blocking_pid);"
+            language="sql"
+            title="SQL · Blocker Session Cancellation"
+          />
 
           <h3>Time-Travel Session Replay</h3>
           <p>
@@ -226,21 +225,11 @@ CREATE EXTENSION IF NOT EXISTS hypopg;`}</code>
             Every generated script automatically uses <code>CONCURRENTLY</code> modifiers to ensure exclusive table locks are never held:
           </p>
 
-          <div className="docs-code-card">
-            <div className="docs-code-header">
-              <div className="docs-code-dots"><span /><span /><span /></div>
-              <span>SQL · Non-Blocking Index Creation</span>
-              <button
-                onClick={() => copyCode(`CREATE INDEX CONCURRENTLY idx_users_org_id ON "users" (org_id);`, "sql-create-idx")}
-                className="docs-copy-btn"
-              >
-                {copiedId === "sql-create-idx" ? "✓ Copied" : "Copy SQL"}
-              </button>
-            </div>
-            <pre className="docs-code-content">
-              <code>CREATE INDEX CONCURRENTLY idx_users_org_id ON "users" (org_id);</code>
-            </pre>
-          </div>
+          <CodeCard
+            code={`-- Safe Zero-Downtime Index Creation\nCREATE INDEX CONCURRENTLY idx_users_org_id ON "users" (org_id);`}
+            language="sql"
+            title="SQL · Non-Blocking Index Creation"
+          />
         </div>
       ),
     },
@@ -414,7 +403,7 @@ CREATE EXTENSION IF NOT EXISTS hypopg;`}</code>
               <span className="docs-search-icon">🔍</span>
               <input
                 type="text"
-                placeholder="Search topics & features..."
+                placeholder="Search topics..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="docs-search-input"
@@ -445,10 +434,10 @@ CREATE EXTENSION IF NOT EXISTS hypopg;`}</code>
             })}
 
             <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
-              <Link href="/quickstart" style={{ fontSize: "0.84rem", color: "var(--brand)", display: "flex", alignItems: "center", gap: 6, textDecoration: "none", marginBottom: 8 }}>
+              <Link href="/quickstart" style={{ fontSize: "0.86rem", color: "var(--brand)", display: "flex", alignItems: "center", gap: 6, textDecoration: "none", marginBottom: 8, fontWeight: 500 }}>
                 <span>🚀</span> Quickstart Guide →
               </Link>
-              <Link href="/faq" style={{ fontSize: "0.84rem", color: "var(--brand)", display: "flex", alignItems: "center", gap: 6, textDecoration: "none" }}>
+              <Link href="/faq" style={{ fontSize: "0.86rem", color: "var(--brand)", display: "flex", alignItems: "center", gap: 6, textDecoration: "none", fontWeight: 500 }}>
                 <span>❓</span> FAQ →
               </Link>
             </div>
