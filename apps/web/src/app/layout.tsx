@@ -9,6 +9,13 @@ export const metadata: Metadata = {
   title: "PG Vitals — PostgreSQL Monitoring & Diagnostics",
   description:
     "Real-time PostgreSQL connection monitoring, session analysis, index & vacuum advisors, and root-cause diagnostics.",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/apple-icon.svg",
+    shortcut: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

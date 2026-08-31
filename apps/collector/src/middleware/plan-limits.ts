@@ -29,7 +29,7 @@ const PLAN_LIMITS: Record<string, PlanLimits> = {
     retentionDays: 1,
   },
   pro: {
-    maxDatabases: Infinity,
+    maxDatabases: 5,
     alertingEnabled: true,
     queryPerformanceEnabled: true,
     indexAdvisorEnabled: true,
@@ -53,10 +53,15 @@ const PLAN_LIMITS: Record<string, PlanLimits> = {
 /**
  * Returns the plan limits for the authenticated user's organization.
  */
-export function getLimits(planTier: string): PlanLimits {
+export function getLimits(planTier: string, isTrialActive: boolean = false): PlanLimits {
+  if (isTrialActive) {
+    return {
+      ...PLAN_LIMITS.pro,
+      maxDatabases: 2, // Free trial is capped at 2 databases for server performance
+    };
+  }
   return PLAN_LIMITS[planTier] ?? PLAN_LIMITS.free;
 }
-
 
 /**
  * Fastify preHandler that checks if the user can add more databases.
@@ -65,8 +70,8 @@ export async function checkDatabaseLimit(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  const { orgId, planTier } = request.auth;
-  const limits = getLimits(planTier);
+  const { orgId, planTier, isTrialActive } = request.auth;
+  const limits = getLimits(planTier, isTrialActive);
 
   const existing = await db
     .select({ id: monitoredDatabases.id })
@@ -74,8 +79,9 @@ export async function checkDatabaseLimit(
     .where(eq(monitoredDatabases.orgId, orgId));
 
   if (existing.length >= limits.maxDatabases) {
+    const planLabel = isTrialActive ? "Free Trial" : `${planTier.charAt(0).toUpperCase() + planTier.slice(1)} plan`;
     return reply.status(403).send({
-      error: `Your ${planTier} plan allows up to ${limits.maxDatabases} database(s). Upgrade to add more.`,
+      error: `Your ${planLabel} allows up to ${limits.maxDatabases} database(s). Upgrade to Pro to monitor up to 5 databases.`,
       code: "PLAN_LIMIT_EXCEEDED",
       currentCount: existing.length,
       limit: limits.maxDatabases,
@@ -88,13 +94,13 @@ export async function checkDatabaseLimit(
  */
 export function requireFeature(feature: keyof Omit<PlanLimits, "maxDatabases" | "retentionDays">) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    const limits = getLimits(request.auth.planTier);
+    const limits = getLimits(request.auth.planTier, request.auth.isTrialActive);
     if (!limits[feature]) {
       return reply.status(403).send({
         error: `This feature requires a Pro or Team plan.`,
         code: "FEATURE_NOT_AVAILABLE",
         feature,
-        currentPlan: request.auth.planTier,
+        currentPlan: request.auth.effectivePlanTier,
       });
     }
   };

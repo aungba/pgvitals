@@ -120,6 +120,13 @@
       "when": 1785427200010,
       "tag": "0015_dba_features_phase2_4",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785427200011,
+      "tag": "0016_add_trial_columns",
+      "breakpoints": true
     }
   ]
 }

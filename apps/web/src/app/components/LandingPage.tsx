@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import ThemeToggle from "./ThemeToggle";
+import { LogoIcon } from "./Logo";
 
 /* ===================================================================
    PG Vitals — Public Marketing Landing Page
@@ -87,20 +88,7 @@ GRANT SELECT ON pg_stat_statements TO pgvitals_monitor;`;
       <header className="landing-nav">
         <div className="landing-nav-container">
           <Link href="/" className="landing-brand">
-            <div className="sidebar-logo-icon">
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-              </svg>
-            </div>
+            <LogoIcon size={36} />
             <span className="landing-brand-title">PG Vitals</span>
           </Link>
 
@@ -563,7 +551,7 @@ WHERE deleted_at IS NULL;`}</code>
               </ul>
 
               <Link href="/sign-up" className="btn-secondary landing-plan-btn">
-                Start Free
+                Start Free (1 DB)
               </Link>
             </div>
 
@@ -588,7 +576,7 @@ WHERE deleted_at IS NULL;`}</code>
               </ul>
 
               <Link href="/sign-up" className="btn-primary landing-plan-btn">
-                Get Started with Pro
+                Start 14-Day Free Trial
               </Link>
             </div>
 
@@ -672,20 +660,7 @@ WHERE deleted_at IS NULL;`}</code>
         <div className="landing-container landing-footer-content">
           <div className="landing-footer-brand">
             <div className="landing-brand">
-              <div className="sidebar-logo-icon">
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="white"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                </svg>
-              </div>
+              <LogoIcon size={32} />
               <span className="landing-brand-title">PG Vitals</span>
             </div>
             <p className="landing-footer-tagline">

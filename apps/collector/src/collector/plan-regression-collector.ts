@@ -2,10 +2,15 @@ import type { FastifyBaseLogger } from "fastify";
 import { db, queryStats, queryPlanSnapshots, monitoredDatabases } from "@pgvitals/db";
 import { eq, and, desc, gt, sql, ne, isNotNull } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
-import { safeQuery } from "../lib/safe-query.js";
 import { config } from "../config.js";
 import type { GeneratedHint } from "./rules-engine.js";
-import * as crypto from "crypto";
+import {
+  executeRobustExplain,
+  extractNodeTypes,
+  hashPlanShape,
+  detectPlanFlags,
+  type PlanNode,
+} from "../lib/explain-executor.js";
 
 /* ===================================================================
    Plan Regression Collector — spec §2.10, Phase 9
@@ -14,70 +19,7 @@ import * as crypto from "crypto";
    plan shape changes (e.g. index scan → seq scan).
    =================================================================== */
 
-interface PlanNode {
-  "Node Type": string;
-  "Total Cost"?: number;
-  "Plan Rows"?: number;
-  "Relation Name"?: string;
-  "Alias"?: string;
-  "Filter"?: string;
-  "Index Name"?: string;
-  Plans?: PlanNode[];
-  [key: string]: unknown;
-}
-
-/**
- * Recursively extracts all node types from an EXPLAIN plan in DFS order.
- */
-function extractNodeTypes(node: PlanNode): string[] {
-  const types: string[] = [node["Node Type"]];
-  if (node.Plans) {
-    for (const child of node.Plans) {
-      types.push(...extractNodeTypes(child));
-    }
-  }
-  return types;
-}
-
-/**
- * Creates a normalized hash of plan node types for shape comparison.
- */
-function hashPlanShape(nodeTypes: string[]): string {
-  const shapeStr = nodeTypes.join(" → ");
-  return crypto.createHash("sha256").update(shapeStr).digest("hex").slice(0, 16);
-}
-
-/**
- * Detects plan flags (concerning patterns) in the plan.
- */
-export function detectPlanFlags(node: PlanNode, flags: Record<string, unknown> = {}): Record<string, unknown> {
-  const nodeType = node["Node Type"] ?? "";
-  const planRows = node["Plan Rows"] ?? 0;
-  const relationName = node["Relation Name"] ?? node["Alias"];
-
-  if (nodeType.includes("Seq Scan") && planRows > 5000) {
-    flags["seq_scan_large_table"] = true;
-    if (relationName) flags["seq_scan_table"] = relationName;
-    flags["seq_scan_rows"] = planRows;
-  }
-
-  if (nodeType.includes("Nested Loop") && planRows > 5000) {
-    flags["nested_loop_high_rows"] = true;
-    flags["nested_loop_rows"] = planRows;
-  }
-
-  if (node["Filter"] && nodeType.includes("Seq Scan")) {
-    flags["unindexed_filter"] = true;
-  }
-
-  if (node.Plans) {
-    for (const child of node.Plans) {
-      detectPlanFlags(child, flags);
-    }
-  }
-
-  return flags;
-}
+export { extractNodeTypes, hashPlanShape, detectPlanFlags, type PlanNode };
 
 export interface PlanRegressionAnalysis {
   isRegression: boolean;
@@ -276,107 +218,18 @@ export async function collectPlanSnapshots(
     try {
       if (!query.queryText) continue;
 
-      // Skip utility statements that can't be EXPLAINed
-      const trimmed = query.queryText.trim().toUpperCase();
-      if (
-        trimmed.startsWith("SET ") ||
-        trimmed.startsWith("RESET ") ||
-        trimmed.startsWith("COPY ") ||
-        trimmed.startsWith("CREATE ") ||
-        trimmed.startsWith("ALTER ") ||
-        trimmed.startsWith("DROP ") ||
-        trimmed.startsWith("GRANT ") ||
-        trimmed.startsWith("REVOKE ") ||
-        trimmed.startsWith("VACUUM ") ||
-        trimmed.startsWith("ANALYZE ") ||
-        trimmed.startsWith("COMMIT") ||
-        trimmed.startsWith("BEGIN") ||
-        trimmed.startsWith("ROLLBACK") ||
-        trimmed.startsWith("LISTEN") ||
-        trimmed.startsWith("UNLISTEN") ||
-        trimmed.startsWith("CLOSE") ||
-        trimmed.startsWith("DEALLOCATE") ||
-        trimmed.startsWith("DISCARD")
-      ) {
-        continue;
-      }
+      const explainOutput = await executeRobustExplain(connectionString, query.queryText, {
+        log,
+        timeoutMs: 10000,
+      });
 
-      // pg_stat_statements stores queries with $1, $2 parameter placeholders.
-      // We need to use PREPARE + EXPLAIN (GENERIC_PLAN) to get plans for these.
-      // Count the number of parameters to build the type list.
-      const paramMatches = query.queryText.match(/\$\d+/g);
-      const paramCount = paramMatches
-        ? Math.max(...paramMatches.map((p) => parseInt(p.slice(1), 10)))
-        : 0;
+      if (!explainOutput.planJson || explainOutput.planJson.length === 0) continue;
 
-      let explainResult: Array<{ "QUERY PLAN": PlanNode[] }> | undefined;
-
-      if (paramCount > 0) {
-        // Strategy 1: PREPARE + EXPLAIN (GENERIC_PLAN) — PG 16+
-        const paramTypes = Array(paramCount).fill("unknown").join(", ");
-        const stmtName = `pgv_plan_${query.queryid}`;
-
-        try {
-          await safeQuery(
-            connectionString,
-            `DEALLOCATE ${stmtName}`,
-            { timeoutMs: 3000 }
-          ).catch(() => {}); // ignore if not exists
-
-          await safeQuery(
-            connectionString,
-            `PREPARE ${stmtName}(${paramTypes}) AS ${query.queryText}`,
-            { timeoutMs: 5000 }
-          );
-
-          explainResult = await safeQuery<Array<{ "QUERY PLAN": PlanNode[] }>>(
-            connectionString,
-            `EXPLAIN (FORMAT JSON, GENERIC_PLAN) EXECUTE ${stmtName}`,
-            { timeoutMs: 10000 }
-          );
-
-          await safeQuery(
-            connectionString,
-            `DEALLOCATE ${stmtName}`,
-            { timeoutMs: 3000 }
-          ).catch(() => {});
-        } catch {
-          // Strategy 2: Replace $N with NULL — works on all PG versions.
-          // This gives approximate plan shape (NULLs may produce different
-          // cost estimates, but the node types / plan shape will be correct
-          // in most cases, which is sufficient for regression detection).
-          try {
-            const nullQuery = query.queryText.replace(/\$\d+/g, "NULL");
-            explainResult = await safeQuery<Array<{ "QUERY PLAN": PlanNode[] }>>(
-              connectionString,
-              `EXPLAIN (FORMAT JSON) ${nullQuery}`,
-              { timeoutMs: 10000 }
-            );
-          } catch {
-            log.debug({ queryid: query.queryid }, "EXPLAIN with NULL substitution also failed, skipping");
-            continue;
-          }
-        }
-      } else {
-        // No parameters — EXPLAIN directly
-        explainResult = await safeQuery<Array<{ "QUERY PLAN": PlanNode[] }>>(
-          connectionString,
-          `EXPLAIN (FORMAT JSON) ${query.queryText}`,
-          { timeoutMs: 10000 }
-        );
-      }
-
-      if (!explainResult || explainResult.length === 0) continue;
-
-      const planArray = explainResult[0]["QUERY PLAN"];
-      if (!planArray || planArray.length === 0) continue;
-
-      const rootNode = planArray[0];
-      const nodeTypes = extractNodeTypes(rootNode);
-      const planShapeHash = hashPlanShape(nodeTypes);
-      const topNodeType = rootNode["Node Type"];
-      const estimatedCost = rootNode["Total Cost"] ?? null;
-      const planFlags = detectPlanFlags(rootNode);
+      const planArray = explainOutput.planJson;
+      const planShapeHash = explainOutput.planShapeHash;
+      const topNodeType = explainOutput.topNodeType;
+      const estimatedCost = explainOutput.estimatedCost;
+      const planFlags = explainOutput.planFlags;
 
       // Store the plan snapshot
       await db.insert(queryPlanSnapshots).values({

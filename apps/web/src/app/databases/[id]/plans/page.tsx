@@ -83,6 +83,12 @@ export default function PlansPage() {
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
+  // Custom Parameter Binding Modal State
+  const [showParamModal, setShowParamModal] = useState(false);
+  const [customParams, setCustomParams] = useState<Record<string, string>>({});
+  const [customSql, setCustomSql] = useState("");
+  const [paramError, setParamError] = useState<string | null>(null);
+
   // ── Data Fetching ──────────────────────────────────────────────
 
   const fetchData = useCallback(async () => {
@@ -197,7 +203,27 @@ export default function PlansPage() {
     return result;
   }, [queryList, queryFilter, querySearch, trackedIds]);
 
-  // Trigger On-Demand Capture
+  // Extract parameter placeholders ($1, $2, etc.) from selected query
+  const detectedParams = useMemo(() => {
+    if (!selectedQuery?.queryText) return [];
+    const matches = selectedQuery.queryText.match(/\$\d+/g) || [];
+    const unique = Array.from(new Set(matches));
+    return unique.sort((a, b) => parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10));
+  }, [selectedQuery]);
+
+  const openParamModal = () => {
+    if (!selectedQuery) return;
+    const initialParams: Record<string, string> = {};
+    for (const p of detectedParams) {
+      initialParams[p] = customParams[p] || "";
+    }
+    setCustomParams(initialParams);
+    setCustomSql(selectedQuery.queryText);
+    setParamError(null);
+    setShowParamModal(true);
+  };
+
+  // Trigger On-Demand Capture (Automatic)
   const handleCaptureNow = async () => {
     if (!selectedQuery) return;
     setCapturing(true);
@@ -205,10 +231,42 @@ export default function PlansPage() {
     try {
       await captureExplainPlan(id, selectedQuery.queryid, selectedQuery.queryText);
       await fetchPlans(selectedQuery.queryid);
+      setTrackedIds((prev) => new Set([...prev, selectedQuery.queryid]));
       setCaptureMessage("Plan successfully captured!");
       setTimeout(() => setCaptureMessage(null), 3000);
-    } catch {
-      setCaptureMessage("Failed to capture plan. Query may require specific parameter bindings.");
+    } catch (err: any) {
+      const msg = err?.message || "Failed to capture plan.";
+      setCaptureMessage(msg);
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  // Trigger On-Demand Capture with Custom Parameter Bindings
+  const handleExecuteCustomParamExplain = async () => {
+    if (!selectedQuery) return;
+    setCapturing(true);
+    setParamError(null);
+    try {
+      const hasBindings = Object.values(customParams).some((v) => v.trim() !== "");
+      const isSqlModified = customSql.trim() !== selectedQuery.queryText.trim();
+
+      await captureExplainPlan(
+        id,
+        selectedQuery.queryid,
+        customSql || selectedQuery.queryText,
+        {
+          parameters: hasBindings ? customParams : undefined,
+          overrideQueryText: isSqlModified ? customSql : undefined,
+        }
+      );
+      await fetchPlans(selectedQuery.queryid);
+      setTrackedIds((prev) => new Set([...prev, selectedQuery.queryid]));
+      setShowParamModal(false);
+      setCaptureMessage("Plan successfully captured with parameter bindings!");
+      setTimeout(() => setCaptureMessage(null), 3500);
+    } catch (err: any) {
+      setParamError(err?.message || "Failed to capture plan with the provided parameters.");
     } finally {
       setCapturing(false);
     }
@@ -511,12 +569,12 @@ export default function PlansPage() {
                     </code>
                   </div>
 
-                  <div style={{ display: "flex", gap: "var(--space-sm)", alignItems: "center" }}>
+                  <div style={{ display: "flex", gap: "var(--space-sm)", alignItems: "center", flexWrap: "wrap" }}>
                     <button
                       onClick={handleCaptureNow}
                       disabled={capturing}
                       className="btn-primary"
-                      style={{ fontSize: "0.8rem", padding: "8px 16px", display: "flex", alignItems: "center", gap: 6 }}
+                      style={{ fontSize: "0.8rem", padding: "8px 14px", display: "flex", alignItems: "center", gap: 6 }}
                     >
                       {capturing ? (
                         <>
@@ -524,20 +582,53 @@ export default function PlansPage() {
                           Capturing…
                         </>
                       ) : (
-                        <>⚡ Capture Plan Now</>
+                        <>⚡ Capture Plan</>
                       )}
                     </button>
+
+                    <button
+                      onClick={openParamModal}
+                      className="btn-secondary"
+                      style={{ fontSize: "0.8rem", padding: "8px 12px", display: "flex", alignItems: "center", gap: 6 }}
+                      title="Provide custom parameter bindings or edit query before explaining"
+                    >
+                      ⚙️ Bind Parameters {detectedParams.length > 0 && `(${detectedParams.length})`}
+                    </button>
+
+                    {pastedPlan && (
+                      <button
+                        onClick={() => setPastedPlan(null)}
+                        className="btn-secondary"
+                        style={{ fontSize: "0.75rem", padding: "6px 10px", color: "var(--signal-warning)" }}
+                        title="Clear pasted plan and view saved database snapshots"
+                      >
+                        ✕ Clear Pasted Plan
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 {captureMessage && (
                   <div style={{
-                    marginTop: "var(--space-sm)", padding: "6px 12px", borderRadius: "var(--radius-sm)",
-                    background: captureMessage.includes("Failed") ? "var(--signal-critical-dim)" : "var(--signal-healthy-dim)",
-                    color: captureMessage.includes("Failed") ? "var(--signal-critical)" : "var(--signal-healthy)",
-                    fontSize: "0.8rem", fontWeight: 500,
+                    marginTop: "var(--space-sm)", padding: "8px 12px", borderRadius: "var(--radius-sm)",
+                    background: captureMessage.includes("Failed") || captureMessage.includes("error") ? "var(--signal-critical-dim)" : "var(--signal-healthy-dim)",
+                    color: captureMessage.includes("Failed") || captureMessage.includes("error") ? "var(--signal-critical)" : "var(--signal-healthy)",
+                    fontSize: "0.82rem", fontWeight: 500,
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap",
                   }}>
-                    {captureMessage}
+                    <span>{captureMessage}</span>
+                    {captureMessage.includes("Failed") && detectedParams.length > 0 && (
+                      <button
+                        onClick={openParamModal}
+                        style={{
+                          background: "var(--surface)", border: "1px solid var(--border)",
+                          padding: "3px 8px", borderRadius: "var(--radius-sm)", fontSize: "0.75rem",
+                          color: "var(--text-primary)", cursor: "pointer", fontWeight: 600,
+                        }}
+                      >
+                        ⚙️ Open Parameter Binder
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -670,22 +761,178 @@ export default function PlansPage() {
               <div className="glass-card-static" style={{ padding: "var(--space-lg)", minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
                 {plansLoading ? (
                   <div className="skeleton" style={{ height: 260, borderRadius: "var(--radius-md)" }} />
+                ) : (pastedPlan ? (
+                  renderPlanContent(pastedPlan)
                 ) : plans.length === 0 ? (
                   <div style={{ padding: "var(--space-2xl)", textAlign: "center", color: "var(--text-muted)" }}>
                     <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-md)" }}>🔍</div>
-                    <p style={{ fontSize: "1.1rem", fontWeight: 500 }}>No EXPLAIN snapshots captured yet</p>
-                    <p style={{ fontSize: "0.85rem", marginTop: 4 }}>
-                      Click <strong>&quot;⚡ Capture Plan Now&quot;</strong> above to generate an immediate EXPLAIN plan.
+                    <p style={{ fontSize: "1.1rem", fontWeight: 600, color: "var(--text-primary)" }}>No EXPLAIN snapshots captured yet</p>
+                    <p style={{ fontSize: "0.85rem", marginTop: 4, color: "var(--text-secondary)", maxWidth: 460, margin: "6px auto 16px" }}>
+                      Run automatic parameter resolution, provide custom parameter bindings, or paste an existing EXPLAIN JSON plan.
                     </p>
+                    <div style={{ display: "flex", gap: "var(--space-sm)", justifyContent: "center", flexWrap: "wrap" }}>
+                      <button
+                        onClick={handleCaptureNow}
+                        disabled={capturing}
+                        className="btn-primary"
+                        style={{ fontSize: "0.85rem", padding: "8px 16px" }}
+                      >
+                        {capturing ? "Capturing…" : "⚡ Capture Plan Now"}
+                      </button>
+                      <button
+                        onClick={openParamModal}
+                        className="btn-secondary"
+                        style={{ fontSize: "0.85rem", padding: "8px 16px" }}
+                      >
+                        ⚙️ Bind Parameters
+                      </button>
+                      <button
+                        onClick={() => setShowPasteModal(true)}
+                        className="btn-secondary"
+                        style={{ fontSize: "0.85rem", padding: "8px 16px" }}
+                      >
+                        📋 Paste JSON Plan
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   renderPlanContent(currentSnapshot?.planJson)
-                )}
+                ))}
               </div>
             </>
           )}
         </div>
       </div>
+
+      {/* ── Custom Parameters & SQL Modal ── */}
+      {showParamModal && selectedQuery && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "var(--space-lg)",
+        }} onClick={() => setShowParamModal(false)}>
+          <div
+            style={{
+              background: "var(--surface)", borderRadius: "var(--radius-lg)",
+              border: "1px solid var(--border)", padding: "var(--space-xl)",
+              maxWidth: 680, width: "100%", maxHeight: "88vh", overflow: "auto",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "var(--space-xs)" }}>
+              ⚙️ Query Parameter Bindings & EXPLAIN
+            </h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "var(--space-md)" }}>
+              PostgreSQL queries in <code>pg_stat_statements</code> use placeholders ($1, $2, etc.). Provide specific test values below to generate an exact execution plan.
+            </p>
+
+            {/* Detected Parameters Form */}
+            {detectedParams.length > 0 ? (
+              <div style={{ marginBottom: "var(--space-md)" }}>
+                <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--brand)", marginBottom: 8, textTransform: "uppercase" }}>
+                  Detected Parameters ({detectedParams.length})
+                </div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                  gap: "var(--space-sm)",
+                  background: "var(--bg)",
+                  padding: "var(--space-md)",
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid var(--border)",
+                }}>
+                  {detectedParams.map((paramKey) => (
+                    <div key={paramKey} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <label style={{ fontSize: "0.75rem", fontFamily: "var(--font-mono)", color: "var(--brand)", fontWeight: 700 }}>
+                        {paramKey}
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 42 or 'active'"
+                        value={customParams[paramKey] || ""}
+                        onChange={(e) => setCustomParams({ ...customParams, [paramKey]: e.target.value })}
+                        style={{
+                          padding: "6px 8px", fontSize: "0.8rem", fontFamily: "var(--font-mono)",
+                          background: "var(--surface)", border: "1px solid var(--border)",
+                          borderRadius: "var(--radius-sm)", color: "var(--text-primary)",
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{
+                padding: "var(--space-sm) var(--space-md)",
+                background: "var(--surface-alt)",
+                borderRadius: "var(--radius-sm)",
+                fontSize: "0.8rem",
+                color: "var(--text-secondary)",
+                marginBottom: "var(--space-md)",
+              }}>
+                No <code>$N</code> placeholders detected in this query. You can customize the SQL statement below if needed.
+              </div>
+            )}
+
+            {/* Editable SQL Preview */}
+            <div style={{ marginBottom: "var(--space-md)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-secondary)" }}>
+                  Target Query SQL
+                </span>
+                <button
+                  onClick={() => setCustomSql(selectedQuery.queryText)}
+                  style={{
+                    background: "none", border: "none", color: "var(--text-muted)",
+                    fontSize: "0.72rem", cursor: "pointer", textDecoration: "underline",
+                  }}
+                >
+                  Reset to Original
+                </button>
+              </div>
+              <textarea
+                value={customSql}
+                onChange={(e) => setCustomSql(e.target.value)}
+                style={{
+                  width: "100%", minHeight: 120, fontFamily: "var(--font-mono)", fontSize: "0.8rem",
+                  padding: "var(--space-md)", background: "var(--bg)", border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-md)", color: "var(--text-primary)",
+                }}
+              />
+            </div>
+
+            {paramError && (
+              <div style={{
+                marginBottom: "var(--space-md)", padding: "8px 12px", borderRadius: "var(--radius-sm)",
+                background: "var(--signal-critical-dim)", color: "var(--signal-critical)",
+                fontSize: "0.8rem", fontWeight: 500,
+              }}>
+                ⚠️ {paramError}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-sm)" }}>
+              <button
+                onClick={() => setShowParamModal(false)}
+                className="btn-secondary"
+                style={{ fontSize: "0.85rem" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExecuteCustomParamExplain}
+                disabled={capturing}
+                className="btn-primary"
+                style={{ fontSize: "0.85rem" }}
+              >
+                {capturing ? "Capturing Plan…" : "⚡ Execute EXPLAIN with Bindings"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Paste Plan Modal ── */}
       {showPasteModal && (
@@ -753,3 +1000,4 @@ export default function PlansPage() {
     </div>
   );
 }
+

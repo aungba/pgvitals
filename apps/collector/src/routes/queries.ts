@@ -297,17 +297,21 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post<{
     Params: { id: string; queryid: string };
-    Body: { queryText: string };
+    Body: {
+      queryText: string;
+      parameters?: Record<string, string>;
+      overrideQueryText?: string;
+    };
   }>(
     "/api/databases/:id/queries/:queryid/explain",
     { preHandler: [authMiddleware, requireFeature('queryPerformanceEnabled')] },
     async (request, reply) => {
       try {
         const { id, queryid } = request.params;
-        const { queryText } = request.body;
+        const { queryText, parameters, overrideQueryText } = request.body || {};
 
-        if (!queryText) {
-          return reply.status(400).send({ error: "queryText is required" });
+        if (!queryText && !overrideQueryText) {
+          return reply.status(400).send({ error: "queryText or overrideQueryText is required" });
         }
 
         // Verify database belongs to this org
@@ -319,13 +323,18 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
           id,
           parseInt(queryid, 10),
           queryText,
-          request.log
+          request.log,
+          {
+            customParameters: parameters,
+            overrideQueryText,
+          }
         );
 
         return reply.send({ explain: result });
       } catch (err) {
         request.log.error({ err }, "Failed to capture EXPLAIN plan");
-        return reply.status(500).send({ error: "Failed to capture EXPLAIN plan" });
+        const message = err instanceof Error ? err.message : "Failed to capture EXPLAIN plan";
+        return reply.status(500).send({ error: message });
       }
     }
   );

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 36" fill="none">
+  <defs>
+    <linearGradient id="logo-bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1" />
+      <stop offset="50%" stop-color="#7C3AED" />
+      <stop offset="100%" stop-color="#4F46E5" />
+    </linearGradient>
+    <filter id="logo-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#1E1B4B" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Logo Mark -->
+  <g transform="translate(0, 0)">
+    <rect width="36" height="36" rx="8" fill="url(#logo-bg-grad)" />
+    <rect width="36" height="36" rx="8" stroke="white" stroke-opacity="0.18" stroke-width="1" />
+
+    <!-- Database Discs -->
+    <path d="M10 11 C10 9.5 13.5 8.5 18 8.5 C22.5 8.5 26 9.5 26 11 C26 12.5 22.5 13.5 18 13.5 C13.5 13.5 10 12.5 10 11 Z" fill="white" fill-opacity="0.16" />
+    <path d="M10 11 V15.5 C10 17 13.5 18 18 18 C22.5 18 26 17 26 15.5 V11" stroke="white" stroke-width="1.2" stroke-opacity="0.22" fill="none" />
+    <path d="M10 16.5 V21 C10 22.5 13.5 23.5 18 23.5 C22.5 23.5 26 22.5 26 21 V16.5" stroke="white" stroke-width="1.2" stroke-opacity="0.18" fill="none" />
+
+    <!-- Pulse -->
+    <path d="M5.5 18.5 H11 L14 11.5 L18 25 L22 14 L25 18.5 H30.5" 
+          stroke="white" 
+          stroke-width="2.8" 
+          stroke-linecap="round" 
+          stroke-linejoin="round"
+          filter="url(#logo-shadow)" />
+          
+    <circle cx="14" cy="11.5" r="1.5" fill="#38BDF8" />
+    <circle cx="18" cy="25" r="1.5" fill="#34D399" />
+  </g>
+
+  <!-- Typography: PG Vitals -->
+  <text x="48" y="24.5" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="800" letter-spacing="-0.03em" fill="currentColor">
+    PG <tspan fill="#6366F1">Vitals</tspan>
+  </text>
+</svg>

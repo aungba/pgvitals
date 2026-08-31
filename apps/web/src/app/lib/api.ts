@@ -556,11 +556,23 @@ export async function captureExplainPlan(
   dbId: string,
   queryid: number,
   queryText: string,
+  options?: {
+    parameters?: Record<string, string>;
+    overrideQueryText?: string;
+  },
   token?: string,
 ): Promise<{ explain: ExplainCapture }> {
   return request<{ explain: ExplainCapture }>(
     `/api/databases/${dbId}/queries/${queryid}/explain`,
-    { method: "POST", body: JSON.stringify({ queryText }), token },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        queryText,
+        parameters: options?.parameters,
+        overrideQueryText: options?.overrideQueryText,
+      }),
+      token,
+    },
   );
 }
 
@@ -1149,3 +1161,22 @@ export async function simulateIndex(
     { method: "POST", body: JSON.stringify({ indexDdl, testQuery }), token },
   );
 }
+
+/* ---------- Billing & Subscription Status ---------- */
+
+export interface BillingStatus {
+  planTier: "free" | "pro" | "team";
+  effectivePlanTier: "free" | "pro" | "team";
+  isTrialActive: boolean;
+  trialDaysRemaining: number | null;
+  trialEndsAt: string | null;
+  hasStripeCustomer: boolean;
+  hasSubscription: boolean;
+  currentDbCount: number;
+  maxDatabases: number;
+}
+
+export async function getBillingStatus(token?: string): Promise<BillingStatus> {
+  return request<BillingStatus>("/api/billing/status", { token });
+}
+

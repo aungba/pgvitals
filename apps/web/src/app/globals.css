@@ -446,6 +446,28 @@ h4 { font-size: 1.1rem; }
   font-weight: 700;
   color: white;
   box-shadow: var(--shadow-glow-brand);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  flex-shrink: 0;
+}
+
+.sidebar-logo-icon:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 28px rgba(99, 102, 241, 0.35);
+}
+
+.logo-pulse-anim {
+  animation: logo-vital-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes logo-vital-pulse {
+  0%, 100% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
 }
 
 .sidebar-logo-text {

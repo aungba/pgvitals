@@ -4,6 +4,9 @@ import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { UserButton, useAuth } from "@clerk/nextjs";
 import ThemeToggle from "./ThemeToggle";
+import { LogoIcon } from "./Logo";
+import { useApiToken } from "../lib/useApiToken";
+import { getBillingStatus, BillingStatus } from "../lib/api";
 
 const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -11,6 +14,79 @@ function ClerkUserSection() {
   const { isSignedIn } = useAuth();
   if (!isSignedIn) return null;
   return <UserButton />;
+}
+
+function SidebarPlanBadge({ collapsed }: { collapsed: boolean }) {
+  const [status, setStatus] = useState<BillingStatus | null>(null);
+  const { getToken, isReady } = useApiToken();
+
+  useEffect(() => {
+    if (!isReady) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const token = await getToken();
+        const data = await getBillingStatus(token || undefined);
+        if (mounted) setStatus(data);
+      } catch {
+        // silent error fallback
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [getToken, isReady]);
+
+  if (!status) return null;
+
+  if (collapsed) {
+    return (
+      <Link
+        href="/settings/billing"
+        className="sidebar-link"
+        title={status.isTrialActive ? `⚡ Trial: ${status.trialDaysRemaining ?? 14}d left` : `${status.planTier.toUpperCase()} Plan`}
+        style={{ margin: "8px 0" }}
+      >
+        <span className="sidebar-link-icon" style={{ color: "var(--brand)" }}>⚡</span>
+      </Link>
+    );
+  }
+
+  const isTrial = status.isTrialActive;
+  const planLabel = isTrial ? "Pro Trial" : status.planTier === "free" ? "Free Forever" : `${status.planTier.toUpperCase()} Plan`;
+  const capacityLabel = status.maxDatabases === Infinity ? `${status.currentDbCount} DBs` : `${status.currentDbCount} / ${status.maxDatabases} DBs`;
+
+  return (
+    <Link
+      href="/settings/billing"
+      style={{
+        display: "block",
+        margin: "12px 10px",
+        padding: "10px 12px",
+        borderRadius: "8px",
+        background: isTrial ? "rgba(59, 130, 246, 0.08)" : "rgba(255, 255, 255, 0.03)",
+        border: isTrial ? "1px solid rgba(59, 130, 246, 0.25)" : "1px solid var(--border)",
+        textDecoration: "none",
+        color: "inherit",
+        transition: "all 0.2s ease",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+        <span style={{ fontSize: "12px", fontWeight: 600, color: isTrial ? "var(--brand)" : "var(--text-primary)" }}>
+          {isTrial ? "⚡ Pro Trial" : planLabel}
+        </span>
+        {isTrial && (
+          <span style={{ fontSize: "11px", color: "var(--brand)", fontWeight: 500 }}>
+            {status.trialDaysRemaining ?? 14}d left
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", color: "var(--text-secondary)" }}>
+        <span>Capacity:</span>
+        <span style={{ fontWeight: 600 }}>{capacityLabel}</span>
+      </div>
+    </Link>
+  );
 }
 
 
@@ -178,20 +254,7 @@ export default function Sidebar() {
       <aside className="sidebar">
         {/* Logo */}
         <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-            </svg>
-          </div>
+          <LogoIcon size={36} />
           <span className="sidebar-logo-text">PG Vitals</span>
         </div>
 
@@ -203,6 +266,9 @@ export default function Sidebar() {
           <SidebarLink href="/settings/team" icon="team" label="Team" collapsed={collapsed} />
           <SidebarLink href="/landing" icon="landing" label="Public Site" collapsed={collapsed} />
         </nav>
+
+        {/* Plan & Quota Widget */}
+        <SidebarPlanBadge collapsed={collapsed} />
 
         {/* Footer */}
         <div className="sidebar-footer">

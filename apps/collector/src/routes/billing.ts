@@ -23,22 +23,44 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
     { preHandler: [authMiddleware, requireRole('owner')] },
     async (request, reply) => {
       try {
-        const { orgId, planTier } = request.auth;
+        const { orgId, planTier, effectivePlanTier, isTrialActive, trialDaysRemaining, trialEndsAt } = request.auth;
 
         const [org] = await db
           .select({
             planTier: organizations.planTier,
             stripeCustomerId: organizations.stripeCustomerId,
             stripeSubscriptionId: organizations.stripeSubscriptionId,
+            trialStartedAt: organizations.trialStartedAt,
+            trialEndsAt: organizations.trialEndsAt,
+            hasUsedTrial: organizations.hasUsedTrial,
           })
           .from(organizations)
           .where(eq(organizations.id, orgId))
           .limit(1);
 
+        const existingDbs = await db
+          .select({ id: monitoredDatabases.id })
+          .from(monitoredDatabases)
+          .where(eq(monitoredDatabases.orgId, orgId));
+
+        const maxDatabases = isTrialActive
+          ? 2
+          : org?.planTier === "pro"
+            ? 5
+            : org?.planTier === "team"
+              ? Infinity
+              : 1;
+
         return reply.send({
           planTier: org?.planTier ?? "free",
+          effectivePlanTier,
+          isTrialActive,
+          trialDaysRemaining,
+          trialEndsAt: trialEndsAt ?? (org?.trialEndsAt ? org.trialEndsAt.toISOString() : null),
           hasStripeCustomer: !!org?.stripeCustomerId,
           hasSubscription: !!org?.stripeSubscriptionId,
+          currentDbCount: existingDbs.length,
+          maxDatabases,
         });
       } catch (err) {
         request.log.error({ err }, "Failed to get billing status");
@@ -93,18 +115,11 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
             .where(eq(organizations.id, orgId));
         }
 
-        // Per-database billing: quantity = number of monitored databases
-        // New subscribers get quantity = current DBs + 1 (the one they'll add next)
-        const existingDbs = await db
-          .select({ id: monitoredDatabases.id })
-          .from(monitoredDatabases)
-          .where(eq(monitoredDatabases.orgId, orgId));
-        const dbQuantity = Math.max(existingDbs.length, 1);
-
+        // Tier package pricing: Base Pro includes up to 5 databases, Team includes unlimited
         const session = await stripe.checkout.sessions.create({
           customer: customerId,
           mode: "subscription",
-          line_items: [{ price: priceId, quantity: dbQuantity }],
+          line_items: [{ price: priceId, quantity: 1 }],
           success_url: successUrl,
           cancel_url: cancelUrl,
           metadata: { orgId: org.id },

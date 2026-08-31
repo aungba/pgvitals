@@ -12,9 +12,46 @@ declare module "fastify" {
       clerkUserId: string;
       clerkOrgId: string | null;
       planTier: "free" | "pro" | "team";
+      effectivePlanTier: "free" | "pro" | "team";
+      isTrialActive: boolean;
+      trialDaysRemaining: number | null;
+      trialEndsAt: string | null;
       role: "owner" | "admin" | "member";
     };
   }
+}
+
+/**
+ * Computes effective plan and trial status based on org planTier and trialEndsAt.
+ */
+export function computeEffectivePlan(org: {
+  planTier: "free" | "pro" | "team";
+  trialEndsAt?: Date | null;
+}): {
+  effectivePlanTier: "free" | "pro" | "team";
+  isTrialActive: boolean;
+  trialDaysRemaining: number | null;
+  trialEndsAt: string | null;
+} {
+  const trialEnds = org.trialEndsAt ? new Date(org.trialEndsAt) : null;
+  const isTrialActive =
+    org.planTier === "free" &&
+    trialEnds !== null &&
+    trialEnds.getTime() > Date.now();
+
+  const trialDaysRemaining =
+    isTrialActive && trialEnds
+      ? Math.max(0, Math.ceil((trialEnds.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+      : null;
+
+  const effectivePlanTier: "free" | "pro" | "team" = isTrialActive ? "pro" : org.planTier;
+
+  return {
+    effectivePlanTier,
+    isTrialActive,
+    trialDaysRemaining,
+    trialEndsAt: trialEnds ? trialEnds.toISOString() : null,
+  };
 }
 
 /**
@@ -35,7 +72,11 @@ export async function authMiddleware(
   // Dev mode fallback — if Clerk is not configured, use first org
   if (!isAuthEnabled()) {
     const [org] = await db
-      .select({ id: organizations.id, planTier: organizations.planTier })
+      .select({
+        id: organizations.id,
+        planTier: organizations.planTier,
+        trialEndsAt: organizations.trialEndsAt,
+      })
       .from(organizations)
       .limit(1);
 
@@ -49,12 +90,18 @@ export async function authMiddleware(
       .where(eq(users.orgId, org.id))
       .limit(1);
 
+    const trialInfo = computeEffectivePlan(org);
+
     request.auth = {
       userId: user?.id ?? "dev-user",
       orgId: org.id,
       clerkUserId: "dev-user",
       clerkOrgId: null,
       planTier: org.planTier,
+      effectivePlanTier: trialInfo.effectivePlanTier,
+      isTrialActive: trialInfo.isTrialActive,
+      trialDaysRemaining: trialInfo.trialDaysRemaining,
+      trialEndsAt: trialInfo.trialEndsAt,
       role: user?.role ?? "owner",
     };
     return;
@@ -78,19 +125,23 @@ export async function authMiddleware(
     const clerkOrgId = (payload as Record<string, unknown>).org_id as string | undefined;
 
     // Sync user and org to our database
-    const { userId, orgId, planTier, role } = await syncUserAndOrg(
+    const authData = await syncUserAndOrg(
       clerkUserId,
       clerkOrgId ?? null,
       request
     );
 
     request.auth = {
-      userId,
-      orgId,
+      userId: authData.userId,
+      orgId: authData.orgId,
       clerkUserId,
       clerkOrgId: clerkOrgId ?? null,
-      planTier,
-      role,
+      planTier: authData.planTier,
+      effectivePlanTier: authData.effectivePlanTier,
+      isTrialActive: authData.isTrialActive,
+      trialDaysRemaining: authData.trialDaysRemaining,
+      trialEndsAt: authData.trialEndsAt,
+      role: authData.role,
     };
   } catch (err) {
     request.log.warn({ err }, "JWT verification failed");
@@ -106,7 +157,16 @@ async function syncUserAndOrg(
   clerkUserId: string,
   clerkOrgId: string | null,
   request: FastifyRequest
-): Promise<{ userId: string; orgId: string; planTier: "free" | "pro" | "team"; role: "owner" | "admin" | "member" }> {
+): Promise<{
+  userId: string;
+  orgId: string;
+  planTier: "free" | "pro" | "team";
+  effectivePlanTier: "free" | "pro" | "team";
+  isTrialActive: boolean;
+  trialDaysRemaining: number | null;
+  trialEndsAt: string | null;
+  role: "owner" | "admin" | "member";
+}> {
   // 1. Find or create organization
   let org;
 
@@ -119,16 +179,21 @@ async function syncUserAndOrg(
       .limit(1);
 
     if (!org) {
-      // Create new org for this Clerk organization
+      const trialStart = new Date();
+      const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      // Create new org for this Clerk organization with 14-day trial
       [org] = await db
         .insert(organizations)
         .values({
           name: "My Organization",
           clerkOrgId,
           planTier: "free",
+          trialStartedAt: trialStart,
+          trialEndsAt: trialEnd,
+          hasUsedTrial: true,
         })
         .returning();
-      request.log.info({ orgId: org.id, clerkOrgId }, "Created new organization from Clerk");
+      request.log.info({ orgId: org.id, clerkOrgId }, "Created new organization from Clerk with 14-day trial");
     }
   } else {
     // No org in JWT — find or create a personal org for this user
@@ -147,15 +212,20 @@ async function syncUserAndOrg(
     }
 
     if (!org) {
-      // Create personal org
+      const trialStart = new Date();
+      const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      // Create personal org with 14-day trial
       [org] = await db
         .insert(organizations)
         .values({
           name: "Personal",
           planTier: "free",
+          trialStartedAt: trialStart,
+          trialEndsAt: trialEnd,
+          hasUsedTrial: true,
         })
         .returning();
-      request.log.info({ orgId: org.id }, "Created personal organization");
+      request.log.info({ orgId: org.id }, "Created personal organization with 14-day trial");
     }
   }
 
@@ -179,10 +249,16 @@ async function syncUserAndOrg(
     request.log.info({ userId: user.id, clerkUserId }, "Created new user from Clerk");
   }
 
+  const trialInfo = computeEffectivePlan(org);
+
   return {
     userId: user.id,
     orgId: org.id,
     planTier: org.planTier,
+    effectivePlanTier: trialInfo.effectivePlanTier,
+    isTrialActive: trialInfo.isTrialActive,
+    trialDaysRemaining: trialInfo.trialDaysRemaining,
+    trialEndsAt: trialInfo.trialEndsAt,
     role: user.role,
   };
 }

@@ -4,6 +4,7 @@ import {
   varchar,
   timestamp,
   pgEnum,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 export const planTierEnum = pgEnum("plan_tier", ["free", "pro", "team"]);
@@ -15,6 +16,9 @@ export const organizations = pgTable("organizations", {
   clerkOrgId: varchar("clerk_org_id", { length: 255 }).unique(),
   stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
   stripeSubscriptionId: varchar("stripe_subscription_id", { length: 255 }),
+  trialStartedAt: timestamp("trial_started_at", { withTimezone: true }),
+  trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+  hasUsedTrial: boolean("has_used_trial").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
