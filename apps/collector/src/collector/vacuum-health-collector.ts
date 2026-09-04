@@ -7,7 +7,7 @@ import {
   autovacuumStarvationEvents,
   monitoredDatabases,
 } from "@pgvitals/db";
-import { eq, and, gte, desc } from "drizzle-orm";
+import { eq, and, gte, desc, sql } from "drizzle-orm";
 import { decrypt } from "../lib/encryption.js";
 import { safeQuery } from "../lib/safe-query.js";
 import { config } from "../config.js";
@@ -331,37 +331,66 @@ export async function collectVacuumHealth(
   }
 
   // 1b. Collect table size history for growth forecasting
+  // Throttled to at most once every 1 hour per monitored database to avoid storage bloat
   try {
-    const sizeRows = await safeQuery<TableSizeRow[]>(
-      connectionString,
-      TABLE_SIZE_QUERY,
-      { timeoutMs: 15000 }
-    );
+    const [latestSnapshot] = await db
+      .select({ capturedAt: tableSizeHistory.capturedAt })
+      .from(tableSizeHistory)
+      .where(eq(tableSizeHistory.monitoredDbId, monitoredDbId))
+      .orderBy(desc(tableSizeHistory.capturedAt))
+      .limit(1);
 
-    if (sizeRows.length > 0) {
-      const DISK_LIMIT_BYTES = parseInt(process.env.DISK_LIMIT_BYTES ?? "107374182400", 10);
-      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    const shouldCapture = !latestSnapshot || (now.getTime() - latestSnapshot.capturedAt.getTime() >= ONE_HOUR_MS);
 
-      const sizeHistoryRows = [];
-      for (const r of sizeRows) {
-        const currentTotalSize = parseInt(r.total_size, 10) || 0;
-        let growthRateBytesPerDay: number | null = null;
-        let projectedDaysToDiskLimit: number | null = null;
+    if (shouldCapture) {
+      const sizeRows = await safeQuery<TableSizeRow[]>(
+        connectionString,
+        TABLE_SIZE_QUERY,
+        { timeoutMs: 15000 }
+      );
 
-        try {
-          const [oldestEntry] = await db
-            .select()
-            .from(tableSizeHistory)
-            .where(
-              and(
-                eq(tableSizeHistory.monitoredDbId, monitoredDbId),
-                eq(tableSizeHistory.tableName, r.relname),
-                gte(tableSizeHistory.capturedAt, sevenDaysAgo)
-              )
-            )
-            .orderBy(tableSizeHistory.capturedAt)
-            .limit(1);
+      if (sizeRows.length > 0) {
+        const DISK_LIMIT_BYTES = parseInt(process.env.DISK_LIMIT_BYTES ?? "107374182400", 10);
+        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
+        // Fetch baseline oldest entry for all tables in a single query instead of N+1 queries in a loop
+        const oldestEntriesResult = await db.execute<{
+          table_name: string;
+          total_size_bytes: string | number;
+          captured_at: string | Date;
+        }>(sql`
+          SELECT DISTINCT ON (table_name)
+            table_name,
+            total_size_bytes,
+            captured_at
+          FROM table_size_history
+          WHERE monitored_db_id = ${monitoredDbId}
+            AND captured_at >= ${sevenDaysAgo}
+          ORDER BY table_name, captured_at ASC
+        `);
+
+        const oldestMap = new Map<string, { totalSizeBytes: number; capturedAt: Date }>();
+        const oldestList = (oldestEntriesResult as unknown as Array<{
+          table_name: string;
+          total_size_bytes: string | number;
+          captured_at: string | Date;
+        }>) ?? [];
+
+        for (const row of oldestList) {
+          oldestMap.set(row.table_name, {
+            totalSizeBytes: Number(row.total_size_bytes),
+            capturedAt: new Date(row.captured_at),
+          });
+        }
+
+        const sizeHistoryRows = [];
+        for (const r of sizeRows) {
+          const currentTotalSize = parseInt(r.total_size, 10) || 0;
+          let growthRateBytesPerDay: number | null = null;
+          let projectedDaysToDiskLimit: number | null = null;
+
+          const oldestEntry = oldestMap.get(r.relname);
           if (oldestEntry) {
             const daysDiff = (now.getTime() - oldestEntry.capturedAt.getTime()) / (1000 * 60 * 60 * 24);
             if (daysDiff > 0.5) {
@@ -372,25 +401,23 @@ export async function collectVacuumHealth(
               }
             }
           }
-        } catch {
-          // Skip
+
+          sizeHistoryRows.push({
+            monitoredDbId,
+            capturedAt: now,
+            tableName: r.relname,
+            schemaName: r.schemaname,
+            tableSizeBytes: parseInt(r.table_size, 10) || 0,
+            indexSizeBytes: parseInt(r.index_size, 10) || 0,
+            totalSizeBytes: currentTotalSize,
+            growthRateBytesPerDay,
+            projectedDaysToDiskLimit,
+          });
         }
 
-        sizeHistoryRows.push({
-          monitoredDbId,
-          capturedAt: now,
-          tableName: r.relname,
-          schemaName: r.schemaname,
-          tableSizeBytes: parseInt(r.table_size, 10) || 0,
-          indexSizeBytes: parseInt(r.index_size, 10) || 0,
-          totalSizeBytes: currentTotalSize,
-          growthRateBytesPerDay,
-          projectedDaysToDiskLimit,
-        });
+        await db.insert(tableSizeHistory).values(sizeHistoryRows);
+        log.info({ monitoredDbId, tableCount: sizeHistoryRows.length }, "Table size history collected");
       }
-
-      await db.insert(tableSizeHistory).values(sizeHistoryRows);
-      log.info({ monitoredDbId, tableCount: sizeHistoryRows.length }, "Table size history collected");
     }
   } catch (err) {
     log.warn({ err, monitoredDbId }, "Failed to collect table size history");

@@ -7,7 +7,7 @@ import {
   autovacuumStarvationEvents,
   monitoredDatabases,
 } from "@pgvitals/db";
-import { eq, desc, and, gte } from "drizzle-orm";
+import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
 import { decrypt } from "../lib/encryption.js";
@@ -218,7 +218,16 @@ export default async function healthRoutes(app: FastifyInstance): Promise<void> 
         }
 
         const tables = await db
-          .select()
+          .select({
+            tableName: tableSizeHistory.tableName,
+            schemaName: tableSizeHistory.schemaName,
+            tableSizeBytes: tableSizeHistory.tableSizeBytes,
+            indexSizeBytes: tableSizeHistory.indexSizeBytes,
+            totalSizeBytes: tableSizeHistory.totalSizeBytes,
+            growthRateBytesPerDay: tableSizeHistory.growthRateBytesPerDay,
+            projectedDaysToDiskLimit: tableSizeHistory.projectedDaysToDiskLimit,
+            capturedAt: tableSizeHistory.capturedAt,
+          })
           .from(tableSizeHistory)
           .where(
             and(
@@ -228,20 +237,38 @@ export default async function healthRoutes(app: FastifyInstance): Promise<void> 
           )
           .orderBy(desc(tableSizeHistory.totalSizeBytes));
 
-        // 30-day history for trend charts
+        // 30-day history for trend charts — downsampled to 1 snapshot per table per day
         const since = new Date();
         since.setDate(since.getDate() - 30);
 
-        const history = await db
-          .select()
-          .from(tableSizeHistory)
-          .where(
-            and(
-              eq(tableSizeHistory.monitoredDbId, id),
-              gte(tableSizeHistory.capturedAt, since)
-            )
-          )
-          .orderBy(tableSizeHistory.capturedAt);
+        const historyRows = await db.execute<{
+          table_name: string;
+          total_size_bytes: string | number;
+          captured_at: string | Date;
+        }>(sql`
+          SELECT DISTINCT ON (table_name, date_trunc('day', captured_at))
+            table_name,
+            total_size_bytes,
+            captured_at
+          FROM table_size_history
+          WHERE monitored_db_id = ${id}
+            AND captured_at >= ${since}
+          ORDER BY table_name, date_trunc('day', captured_at), captured_at DESC
+        `);
+
+        const historyList = (historyRows as unknown as Array<{
+          table_name: string;
+          total_size_bytes: string | number;
+          captured_at: string | Date;
+        }>) ?? [];
+
+        const history = historyList.map((t) => ({
+          tableName: t.table_name,
+          totalSizeBytes: Number(t.total_size_bytes),
+          capturedAt: new Date(t.captured_at).toISOString(),
+        }));
+
+        history.sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime());
 
         return reply.send({
           tables: tables.map((t) => ({
@@ -254,11 +281,7 @@ export default async function healthRoutes(app: FastifyInstance): Promise<void> 
             projectedDaysToDiskLimit: t.projectedDaysToDiskLimit,
             capturedAt: t.capturedAt.toISOString(),
           })),
-          history: history.map((t) => ({
-            tableName: t.tableName,
-            totalSizeBytes: t.totalSizeBytes,
-            capturedAt: t.capturedAt.toISOString(),
-          })),
+          history,
           capturedAt: latest.capturedAt.toISOString(),
         });
       } catch (err) {

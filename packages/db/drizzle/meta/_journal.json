@@ -127,6 +127,13 @@
       "when": 1785427200011,
       "tag": "0016_add_trial_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785427200012,
+      "tag": "0017_table_size_history_indexes",
+      "breakpoints": true
     }
   ]
 }

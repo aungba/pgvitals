@@ -8,6 +8,7 @@ import {
   bigint,
   jsonb,
   primaryKey,
+  index,
   boolean,
   text,
 } from "drizzle-orm/pg-core";
@@ -79,7 +80,11 @@ export const tableSizeHistory = pgTable(
     growthRateBytesPerDay: doublePrecision("growth_rate_bytes_per_day"),
     projectedDaysToDiskLimit: integer("projected_days_to_disk_limit"),
   },
-  (table) => [primaryKey({ columns: [table.id, table.capturedAt] })]
+  (table) => [
+    primaryKey({ columns: [table.id, table.capturedAt] }),
+    index("idx_table_size_history_db_captured").on(table.monitoredDbId, table.capturedAt),
+    index("idx_table_size_history_db_table_captured").on(table.monitoredDbId, table.tableName, table.capturedAt),
+  ]
 );
 
 /**

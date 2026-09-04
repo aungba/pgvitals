@@ -215,25 +215,34 @@ export default function HealthPage() {
       setTables(vacuumData.tables);
       setHealth(healthData.current);
       setHealthHistory(healthData.history);
-      // Fetch cache hit, disk growth, replication, and slot data
-      try {
-        const [cacheData, growthData, replData, slotData, xidData] = await Promise.all([
-          getTableCacheHit(id),
-          getDiskGrowth(id),
-          getReplicationStats(id),
-          getReplicationSlots(id).catch(() => ({ slots: [] })),
-          getXidPerTable(id).catch(() => ({ freezeMaxAge: 200000000, tables: [] })),
-        ]);
-        setCacheHitTables(cacheData.tables);
-        setDiskGrowthTables(growthData.tables);
-        setDiskGrowthHistory(growthData.history ?? []);
-        setReplicas(replData.replicas);
-        setSlots(slotData.slots ?? []);
-        setTableXids(xidData.tables);
-        setXidFreezeMax(xidData.freezeMaxAge);
-      } catch {
-        // optional data
-      }
+      setLoading(false);
+
+      // Fetch cache hit, disk growth, replication, and slot data asynchronously
+      getTableCacheHit(id)
+        .then((cacheData) => setCacheHitTables(cacheData.tables))
+        .catch(() => {});
+
+      getDiskGrowth(id)
+        .then((growthData) => {
+          setDiskGrowthTables(growthData.tables);
+          setDiskGrowthHistory(growthData.history ?? []);
+        })
+        .catch(() => {});
+
+      getReplicationStats(id)
+        .then((replData) => setReplicas(replData.replicas))
+        .catch(() => {});
+
+      getReplicationSlots(id)
+        .then((slotData) => setSlots(slotData.slots ?? []))
+        .catch(() => {});
+
+      getXidPerTable(id)
+        .then((xidData) => {
+          setTableXids(xidData.tables);
+          setXidFreezeMax(xidData.freezeMaxAge);
+        })
+        .catch(() => {});
     } catch {
       // ignore
     } finally {
@@ -335,10 +344,13 @@ export default function HealthPage() {
     const map = new Map<string, Array<{ time: string; size: number }>>();
     for (const entry of diskGrowthHistory) {
       if (!map.has(entry.tableName)) map.set(entry.tableName, []);
-      map.get(entry.tableName)!.push({
-        time: new Date(entry.capturedAt).toLocaleDateString([], { month: "short", day: "numeric" }),
-        size: entry.totalSizeBytes,
-      });
+      const list = map.get(entry.tableName)!;
+      const timeStr = new Date(entry.capturedAt).toLocaleDateString([], { month: "short", day: "numeric" });
+      if (list.length === 0 || list[list.length - 1].time !== timeStr) {
+        list.push({ time: timeStr, size: entry.totalSizeBytes });
+      } else {
+        list[list.length - 1].size = entry.totalSizeBytes;
+      }
     }
     return map;
   }, [diskGrowthHistory]);
