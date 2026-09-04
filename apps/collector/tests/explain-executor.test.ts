@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   isUtilityStatement,
+  isDmlStatement,
+  isQueryTruncated,
   extractParameterInfo,
   applyUserParameters,
   substituteQueryParameters,
@@ -29,6 +31,79 @@ describe("Explain Executor Library", () => {
       expect(isUtilityStatement("INSERT INTO orders (id, total) VALUES ($1, $2)")).toBe(false);
       expect(isUtilityStatement("UPDATE accounts SET balance = $1 WHERE id = $2")).toBe(false);
       expect(isUtilityStatement("DELETE FROM sessions WHERE expired_at < $1")).toBe(false);
+    });
+  });
+
+  describe("isDmlStatement", () => {
+    it("identifies DML modification queries", () => {
+      expect(isDmlStatement("INSERT INTO users (name) VALUES ($1)")).toBe(true);
+      expect(isDmlStatement("UPDATE accounts SET balance = 100 WHERE id = 1")).toBe(true);
+      expect(isDmlStatement("UPDATE users u SET balance = 100 WHERE u.id = 1")).toBe(true);
+      expect(isDmlStatement("UPDATE ONLY users SET balance = 100 WHERE id = 1")).toBe(true);
+      expect(isDmlStatement("UPDATE users AS u SET balance = 100 WHERE u.id = 1")).toBe(true);
+      expect(isDmlStatement("DELETE FROM sessions WHERE expired_at < now()")).toBe(true);
+      expect(isDmlStatement("DELETE FROM ONLY sessions WHERE expired_at < now()")).toBe(true);
+      expect(isDmlStatement("MERGE INTO target USING source ON target.id = source.id WHEN MATCHED THEN UPDATE SET v = source.v")).toBe(true);
+      expect(isDmlStatement("/* comment */ UPDATE tbl SET val = 1")).toBe(true);
+      expect(isDmlStatement("WITH moved AS (DELETE FROM old_orders RETURNING *) SELECT * FROM moved")).toBe(true);
+    });
+
+    it("identifies non-DML queries", () => {
+      expect(isDmlStatement("SELECT * FROM users WHERE id = 1")).toBe(false);
+      expect(isDmlStatement("SELECT \"update\", \"set\" FROM logs")).toBe(false);
+      expect(isDmlStatement("WITH cte AS (SELECT id FROM users) SELECT * FROM cte")).toBe(false);
+    });
+  });
+
+  describe("isQueryTruncated", () => {
+    it("detects queries with unclosed parentheses", () => {
+      expect(isQueryTruncated("SELECT * FROM users WHERE id IN (1, 2, 3")).toBe(true);
+      expect(isQueryTruncated("SELECT COALESCE((SELECT name FROM roles WHERE id = 1")).toBe(true);
+    });
+
+    it("detects queries with unclosed string literals", () => {
+      expect(isQueryTruncated("SELECT * FROM users WHERE name = 'John Doe")).toBe(true);
+    });
+
+    it("detects queries with unclosed block comments", () => {
+      expect(isQueryTruncated("SELECT * FROM users WHERE id = 1 /* unfinished comment")).toBe(true);
+    });
+
+    it("detects queries ending with trailing punctuation or keywords", () => {
+      expect(isQueryTruncated("SELECT id, name,")).toBe(true);
+      expect(isQueryTruncated("INSERT INTO users VALUES (1, 'a'), (")).toBe(true);
+      expect(isQueryTruncated("SELECT * FROM users WHERE")).toBe(true);
+      expect(isQueryTruncated("SELECT * FROM users WHERE id = 1 AND")).toBe(true);
+      expect(isQueryTruncated("SELECT * FROM users JOIN roles ON")).toBe(true);
+    });
+
+    it("does not false-positive on comments with parentheses or apostrophes", () => {
+      const queryWithParenInComment = `
+        SELECT * FROM users
+        -- filter (only active accounts
+        WHERE id = 1;
+      `;
+      expect(isQueryTruncated(queryWithParenInComment)).toBe(false);
+
+      const queryWithApostropheInComment = `
+        SELECT * FROM users
+        -- don't delete anything
+        WHERE id = 1;
+      `;
+      expect(isQueryTruncated(queryWithApostropheInComment)).toBe(false);
+
+      const queryWithBlockComment = `
+        SELECT * FROM users /* (special note) */ WHERE id = 1
+      `;
+      expect(isQueryTruncated(queryWithBlockComment)).toBe(false);
+    });
+
+    it("returns false for complete, valid queries", () => {
+      expect(isQueryTruncated("SELECT * FROM users WHERE id = 1")).toBe(false);
+      expect(isQueryTruncated("SELECT * FROM users WHERE id = 1;")).toBe(false);
+      expect(isQueryTruncated("SELECT * FROM users WHERE id IN (1, 2, 3)")).toBe(false);
+      expect(isQueryTruncated("SELECT * FROM users WHERE name = 'O''Reilly'")).toBe(false);
+      expect(isQueryTruncated("WITH cte AS (SELECT 1 AS n) SELECT * FROM cte")).toBe(false);
     });
   });
 
@@ -79,6 +154,37 @@ describe("Explain Executor Library", () => {
       expect(substituted).toContain("'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid");
       expect(substituted).toContain("NOW()::timestamptz");
       expect(substituted).toContain("1::int");
+    });
+
+    it("replaces context-sensitive clauses like AT TIME ZONE, EXTRACT, ON, array indexing, and TO_CHAR", () => {
+      const query = `
+        SELECT
+          t.created_at AT TIME ZONE $1 AS tz_date,
+          EXTRACT($2 FROM t.created_at) AS hr,
+          t.matrix[$3] AS first_val,
+          TO_CHAR(t.created_at, $4) AS formatted
+        FROM table_a t
+        JOIN table_b ON $5
+        WHERE t.id = $6
+      `;
+      const substituted = substituteQueryParameters(query, "number");
+      expect(substituted).toContain("AT TIME ZONE 'UTC'");
+      expect(substituted).toContain("EXTRACT(epoch FROM t.created_at)");
+      expect(substituted).toContain("t.matrix[1]");
+      expect(substituted).toContain("TO_CHAR(t.created_at, 'YYYY-MM-DD')");
+      expect(substituted).toContain("JOIN table_b ON true");
+      expect(substituted).toContain("WHERE t.id = 1");
+    });
+
+    it("handles complex nested TO_CHAR and parenthesized ON conditions", () => {
+      const query = `
+        SELECT TO_CHAR(COALESCE(t.created_at, NOW()), $1) AS formatted
+        FROM table_a t
+        JOIN table_b ON ($2)
+      `;
+      const substituted = substituteQueryParameters(query, "string");
+      expect(substituted).toContain("TO_CHAR(COALESCE(t.created_at, NOW()), 'YYYY-MM-DD')");
+      expect(substituted).toContain("JOIN table_b ON (true)");
     });
 
     it("supports various fallback defaults", () => {

@@ -82,6 +82,125 @@ export function isUtilityStatement(queryText: string): boolean {
 }
 
 /**
+ * Checks if a query is a DML statement (INSERT, UPDATE, DELETE).
+ * PostgreSQL strictly requires table modification privileges to EXPLAIN DML statements,
+ * which read-only monitoring roles do not have.
+ */
+export function isDmlStatement(queryText: string): boolean {
+  // Strip comments and string literals
+  const cleaned = queryText
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/--.*$/gm, "")
+    .trim();
+  const upper = cleaned.toUpperCase();
+
+  // Top-level DML statements
+  if (/^(INSERT\s+INTO|UPDATE\b|DELETE\s+(?:ONLY\s+)?FROM|MERGE\s+INTO)/i.test(cleaned)) {
+    return true;
+  }
+
+  // Data-modifying CTEs (WITH ... INSERT/UPDATE/DELETE/MERGE)
+  if (upper.startsWith("WITH")) {
+    return /\b(INSERT\s+INTO|UPDATE\s+[\s\S]+?\bSET\b|DELETE\s+(?:ONLY\s+)?FROM|MERGE\s+INTO)\b/i.test(cleaned);
+  }
+
+  return false;
+}
+
+/**
+ * Checks if a query text is truncated (e.g. cut off by PostgreSQL's track_activity_query_size).
+ * Handles string literals, single-line and multi-line comments, and trailing semicolons.
+ */
+export function isQueryTruncated(queryText: string): boolean {
+  const trimmed = queryText.trim().replace(/;+\s*$/, "");
+  if (!trimmed) return false;
+
+  let inSingleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let openParens = 0;
+  let codeWithoutComments = "";
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const char = trimmed[i];
+    const nextChar = trimmed[i + 1];
+
+    if (inLineComment) {
+      if (char === "\n") inLineComment = false;
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && nextChar === "/") {
+        inBlockComment = false;
+        i++; // skip /
+      }
+      continue;
+    }
+
+    if (inSingleQuote) {
+      if (char === "'") {
+        if (nextChar === "'") {
+          i++; // skip escaped quote ''
+        } else {
+          inSingleQuote = false;
+        }
+      }
+      continue;
+    }
+
+    // Normal SQL mode: check comment or string starts
+    if (char === "-" && nextChar === "-") {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+
+    if (char === "/" && nextChar === "*") {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+
+    if (char === "'") {
+      inSingleQuote = true;
+      continue;
+    }
+
+    if (char === "(") {
+      openParens++;
+    } else if (char === ")") {
+      openParens--;
+    }
+
+    codeWithoutComments += char;
+  }
+
+  // If query cuts off inside a string literal, unclosed block comment, or unclosed parentheses
+  if (inSingleQuote || inBlockComment || openParens > 0) {
+    return true;
+  }
+
+  const cleanCode = codeWithoutComments.trim();
+
+  // Check for trailing punctuation / opening brackets that cannot end a valid statement
+  if (/[,(\[]\s*$/.test(cleanCode)) {
+    return true;
+  }
+
+  // Check for trailing clause keywords or operators that indicate cut-off SQL
+  if (
+    /\b(WHERE|AND|OR|JOIN|ON|FROM|SELECT|SET|VALUES|IN|BETWEEN|AS|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET)\s*$/i.test(
+      cleanCode
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Extracts parameter count and identifiers (e.g. $1, $2, $3).
  */
 export function extractParameterInfo(queryText: string): {
@@ -152,7 +271,34 @@ export function substituteQueryParameters(
   modified = modified.replace(/\$\d+::(json|jsonb)\b/gi, "'{}'::$1");
   modified = modified.replace(/\$\d+::(text|varchar|char)\b/gi, "'sample'::$1");
 
-  // 4. Replace remaining $N with fallback based on requested default
+  // 4. Context-aware positional parameter substitutions to prevent Postgres syntax/type errors:
+  // 4a. AT TIME ZONE $N -> AT TIME ZONE 'UTC'
+  modified = modified.replace(/\bAT\s+TIME\s+ZONE\s+\$\d+\b/gi, "AT TIME ZONE 'UTC'");
+
+  // 4b. EXTRACT($N FROM ...) -> EXTRACT(epoch FROM ...)
+  modified = modified.replace(/\bEXTRACT\s*\(\s*\$\d+\s+FROM\b/gi, "EXTRACT(epoch FROM");
+
+  // 4c. JOIN ... ON $N -> ON true / ON ($N) -> ON (true)
+  modified = modified.replace(/\bON\s*\(\s*\$\d+\s*\)/gi, "ON (true)");
+  modified = modified.replace(/\bON\s+\$\d+\b/gi, "ON true");
+
+  // 4d. Array indexing subscripts: [$N] -> [1]
+  modified = modified.replace(/\[\s*\$\d+\s*\]/g, "[1]");
+
+  // 4e. TO_CHAR(..., $N) -> TO_CHAR(..., 'YYYY-MM-DD') with balanced parenthesis check
+  modified = modified.replace(/\bTO_CHAR\s*\(([\s\S]*?),\s*\$\d+\s*\)/gi, (match, p1) => {
+    let open = 0;
+    for (const c of p1) {
+      if (c === "(") open++;
+      else if (c === ")") open--;
+    }
+    if (open === 0) {
+      return `TO_CHAR(${p1}, 'YYYY-MM-DD')`;
+    }
+    return match;
+  });
+
+  // 5. Replace remaining $N with fallback based on requested default
   let fallbackVal: string;
   switch (defaultParamValue) {
     case "number":
@@ -331,12 +477,24 @@ export async function executeRobustExplain(
 
   // If user supplied parameter bindings, apply them first
   let workingQuery = applyUserParameters(queryText, options?.customParameters);
+
+  if (isQueryTruncated(workingQuery)) {
+    throw new Error("Query text is truncated in pg_stat_statements; cannot EXPLAIN incomplete statement.");
+  }
+
   const paramInfo = extractParameterInfo(workingQuery);
 
   let rawJsonResult: Array<{ "QUERY PLAN": PlanNode[] | PlanNode }> | undefined;
   let rawTextResult: Array<{ "QUERY PLAN": string }> | undefined;
   let usedStrategy = "direct";
   let substitutedQueryText: string | undefined;
+
+  const checkPermissionError = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("permission denied") || (err as { code?: string })?.code === "42501") {
+      throw new Error(`Database user lacks permissions required by PostgreSQL to EXPLAIN this statement: ${msg}`);
+    }
+  };
 
   // ─────────────────────────────────────────────────────────────
   // Strategy 1: Direct EXPLAIN if no $N parameters exist
@@ -359,6 +517,7 @@ export async function executeRobustExplain(
       }
       usedStrategy = "direct";
     } catch (directErr) {
+      checkPermissionError(directErr);
       log?.debug({ err: directErr }, "Direct EXPLAIN failed, attempting parameter substitution fallback");
     }
   }
@@ -397,6 +556,7 @@ export async function executeRobustExplain(
       await safeQuery(connectionString, `DEALLOCATE ${stmtName}`, { timeoutMs: 3000 }).catch(() => {});
       usedStrategy = "prepare_generic_untyped";
     } catch (untypedErr) {
+      checkPermissionError(untypedErr);
       log?.debug({ err: untypedErr }, "Untyped PREPARE + GENERIC_PLAN failed, trying typed PREPARE");
       await safeQuery(connectionString, `DEALLOCATE ${stmtName}`, { timeoutMs: 3000 }).catch(() => {});
     }
@@ -420,6 +580,7 @@ export async function executeRobustExplain(
         await safeQuery(connectionString, `DEALLOCATE ${stmtName}`, { timeoutMs: 3000 }).catch(() => {});
         usedStrategy = "prepare_generic_typed";
       } catch (typedErr) {
+        checkPermissionError(typedErr);
         log?.debug({ err: typedErr }, "Typed PREPARE + GENERIC_PLAN failed, trying EXECUTE with dummy args");
         await safeQuery(connectionString, `DEALLOCATE ${stmtName}`, { timeoutMs: 3000 }).catch(() => {});
       }
@@ -430,11 +591,10 @@ export async function executeRobustExplain(
   // Strategy 3: Context-aware Parameter Substitution Fallbacks
   // ─────────────────────────────────────────────────────────────
   if (!rawJsonResult) {
-    const substitutionModes: Array<"string" | "number" | "null" | "default"> = [
+    const substitutionModes: Array<"string" | "number" | "null"> = [
       "string",
       "number",
       "null",
-      "default",
     ];
 
     let lastSubError: unknown = null;
@@ -463,6 +623,7 @@ export async function executeRobustExplain(
         break;
       } catch (subErr) {
         lastSubError = subErr;
+        checkPermissionError(subErr);
       }
     }
 

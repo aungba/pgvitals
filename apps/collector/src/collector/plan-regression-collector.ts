@@ -9,6 +9,8 @@ import {
   extractNodeTypes,
   hashPlanShape,
   detectPlanFlags,
+  isQueryTruncated,
+  isDmlStatement,
   type PlanNode,
 } from "../lib/explain-executor.js";
 
@@ -217,6 +219,19 @@ export async function collectPlanSnapshots(
   for (const query of topQueries) {
     try {
       if (!query.queryText) continue;
+
+      if (isQueryTruncated(query.queryText)) {
+        log.debug({ queryid: query.queryid }, "Skipping truncated query for plan regression capture");
+        continue;
+      }
+
+      if (isDmlStatement(query.queryText)) {
+        log.debug(
+          { queryid: query.queryid },
+          "Skipping DML query for automated plan regression capture (read-only monitoring role)"
+        );
+        continue;
+      }
 
       const explainOutput = await executeRobustExplain(connectionString, query.queryText, {
         log,

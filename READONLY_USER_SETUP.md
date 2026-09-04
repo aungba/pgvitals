@@ -64,3 +64,23 @@ To track slow queries, query performance, and query execution plans, enable `pg_
    ```sql
    CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
    ```
+
+---
+
+## Recommended: Query Text Size (`track_activity_query_size`)
+
+By default, PostgreSQL truncates queries in `pg_stat_statements` at 1,024 bytes. For long queries or large CTEs, this can cut queries off mid-statement and prevent execution plan analysis (`EXPLAIN`).
+
+To ensure complete query texts are captured, increase `track_activity_query_size` in `postgresql.conf`:
+
+```ini
+track_activity_query_size = 16384  # Requires server restart
+```
+
+---
+
+## Note on `EXPLAIN` and Read-Only Users
+
+In PostgreSQL, running `EXPLAIN` on an `INSERT`, `UPDATE`, or `DELETE` statement requires table modification permissions (`INSERT`/`UPDATE`/`DELETE`), even when not executing the statement (`ANALYZE` is disabled).
+
+Because `pgvitals_monitor` is a read-only role, PG Vitals automated plan regression analysis focuses exclusively on `SELECT` queries and read-only CTEs to prevent permission errors.
