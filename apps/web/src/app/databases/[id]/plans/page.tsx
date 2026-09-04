@@ -75,6 +75,7 @@ export default function PlansPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("tree");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null);
   const [compareSnapshotId, setCompareSnapshotId] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Paste modal state
   const [showPasteModal, setShowPasteModal] = useState(false);
@@ -427,25 +428,44 @@ export default function PlansPage() {
       {/* ── Main Layout: Sidebar (Query List) + Main Panel ── */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "340px minmax(0, 1fr)",
+        gridTemplateColumns: sidebarCollapsed ? "1fr" : "340px minmax(0, 1fr)",
         gap: "var(--space-lg)",
         alignItems: "start",
         minWidth: 0,
         maxWidth: "100%",
       }}>
         {/* ── LEFT SIDEBAR: Queries ── */}
-        <div className="glass-card-static" style={{ padding: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-sm)", minWidth: 0 }}>
-          {/* Search Input */}
-          <div className="table-search-wrap" style={{ width: "100%" }}>
-            <span className="table-search-icon">🔍</span>
-            <input
-              className="table-search"
-              placeholder="Search queries..."
-              value={querySearch}
-              onChange={(e) => setQuerySearch(e.target.value)}
-              style={{ width: "100%" }}
-            />
-          </div>
+        {!sidebarCollapsed && (
+          <div className="glass-card-static" style={{ padding: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-sm)", minWidth: 0 }}>
+            {/* Search Input & Collapse Button */}
+            <div style={{ display: "flex", gap: "var(--space-xs)", alignItems: "center" }}>
+              <div className="table-search-wrap" style={{ flex: 1, minWidth: 0 }}>
+                <span className="table-search-icon">🔍</span>
+                <input
+                  className="table-search"
+                  placeholder="Search queries..."
+                  value={querySearch}
+                  onChange={(e) => setQuerySearch(e.target.value)}
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <button
+                onClick={() => setSidebarCollapsed(true)}
+                title="Collapse query sidebar for wider plan view"
+                style={{
+                  padding: "6px 8px",
+                  fontSize: "0.75rem",
+                  background: "var(--surface-alt)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                ◀
+              </button>
+            </div>
 
           {/* Filter Chips */}
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", paddingBottom: "var(--space-xs)" }}>
@@ -531,6 +551,7 @@ export default function PlansPage() {
             )}
           </div>
         </div>
+      )}
 
         {/* ── RIGHT MAIN PANEL: Plan History & Visualizer ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)", minWidth: 0, maxWidth: "100%", width: "100%" }}>
@@ -546,6 +567,27 @@ export default function PlansPage() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "var(--space-md)", flexWrap: "wrap" }}>
                   <div style={{ flex: 1, minWidth: 260 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      {sidebarCollapsed && (
+                        <button
+                          onClick={() => setSidebarCollapsed(false)}
+                          style={{
+                            padding: "3px 8px",
+                            fontSize: "0.72rem",
+                            fontWeight: 600,
+                            background: "var(--surface-alt)",
+                            border: "1px solid var(--border)",
+                            borderRadius: "var(--radius-sm)",
+                            color: "var(--brand)",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                          }}
+                          title="Open query selection sidebar"
+                        >
+                          ▶ Queries ({queryList.length})
+                        </button>
+                      )}
                       <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--brand)" }}>
                         Query #{selectedQuery?.queryid}
                       </span>

@@ -61,6 +61,14 @@ function getNodeStyle(nodeType: string): { border: string; bg: string; icon: str
     return { border: "var(--signal-warning, #f59e0b)", bg: "rgba(245, 158, 11, 0.08)", icon: "🔄" };
   if (t.includes("sort"))
     return { border: "#a855f7", bg: "rgba(168, 85, 247, 0.08)", icon: "↕️" };
+  if (t.includes("hash"))
+    return { border: "#6366f1", bg: "rgba(99, 102, 241, 0.08)", icon: "#" };
+  if (t.includes("aggregate") || t.includes("group"))
+    return { border: "#06b6d4", bg: "rgba(6, 182, 212, 0.08)", icon: "∑" };
+  if (t.includes("materialize"))
+    return { border: "#8b5cf6", bg: "rgba(139, 92, 246, 0.08)", icon: "📦" };
+  if (t.includes("limit"))
+    return { border: "#64748b", bg: "rgba(100, 116, 139, 0.08)", icon: "✂️" };
   return { border: "var(--border, #334155)", bg: "var(--surface-alt, #1e293b)", icon: "○" };
 }
 
@@ -74,6 +82,17 @@ function formatCost(cost: number | undefined | null): string {
   return cost.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
+function collectAllNodePaths(node: PlanNode, path = "0"): string[] {
+  const paths: string[] = [];
+  if (Array.isArray(node.Plans) && node.Plans.length > 0) {
+    paths.push(path);
+    node.Plans.forEach((child, idx) => {
+      paths.push(...collectAllNodePaths(child, `${path}.${idx}`));
+    });
+  }
+  return paths;
+}
+
 export function PlanDiffVisualizer({
   basePlan,
   currentPlan,
@@ -81,6 +100,7 @@ export function PlanDiffVisualizer({
   availableSnapshots = [],
 }: PlanDiffVisualizerProps) {
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
+  const [diffLayout, setDiffLayout] = useState<"side-by-side" | "stacked">("side-by-side");
 
   const baseRoot = getPlanRoot(basePlan.planJson);
   const currentRoot = getPlanRoot(currentPlan.planJson);
@@ -97,6 +117,17 @@ export function PlanDiffVisualizer({
       else next.add(id);
       return next;
     });
+  };
+
+  const handleExpandAll = () => {
+    setCollapsedNodes(new Set());
+  };
+
+  const handleCollapseAll = () => {
+    const allPaths: string[] = [];
+    if (baseRoot) allPaths.push(...collectAllNodePaths(baseRoot, "base"));
+    if (currentRoot) allPaths.push(...collectAllNodePaths(currentRoot, "curr"));
+    setCollapsedNodes(new Set(allPaths));
   };
 
   return (
@@ -155,15 +186,96 @@ export function PlanDiffVisualizer({
         </div>
       </div>
 
-      {/* ── Side-by-Side Dual-Column Trees ── */}
+      {/* ── Visualizer Controls Toolbar ── */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "var(--space-sm)",
+        flexWrap: "wrap",
+        padding: "6px 12px",
+        background: "var(--surface-alt)",
+        borderRadius: "var(--radius-md)",
+        border: "1px solid var(--border)",
+        fontSize: "0.75rem",
+      }}>
+        {/* Left: Info */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text-secondary)" }}>
+          <span style={{ fontWeight: 600, color: "var(--text-primary)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <span>🔀</span>
+            <span>Plan Diff View</span>
+          </span>
+          <span style={{ color: "var(--border)" }}>|</span>
+          <span style={{ fontSize: "0.72rem" }}>
+            Compare node costs, execution operations & scan methods
+          </span>
+        </div>
+
+        {/* Right: Actions (Expand/Collapse, Layout Toggle) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {/* Expand / Collapse all */}
+          <div style={{ display: "inline-flex", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", overflow: "hidden" }}>
+            <button
+              onClick={handleExpandAll}
+              style={{
+                padding: "3px 8px", fontSize: "0.7rem", background: "var(--surface)",
+                color: "var(--text-secondary)", borderRight: "1px solid var(--border)", cursor: "pointer",
+              }}
+              title="Expand all nodes in both plans"
+            >
+              ⊞ Expand All
+            </button>
+            <button
+              onClick={handleCollapseAll}
+              style={{
+                padding: "3px 8px", fontSize: "0.7rem", background: "var(--surface)",
+                color: "var(--text-secondary)", cursor: "pointer",
+              }}
+              title="Collapse all child nodes"
+            >
+              ⊟ Collapse All
+            </button>
+          </div>
+
+          {/* Layout Switcher */}
+          <div style={{ display: "inline-flex", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", overflow: "hidden" }}>
+            <button
+              onClick={() => setDiffLayout("side-by-side")}
+              style={{
+                padding: "3px 8px", fontSize: "0.7rem", fontWeight: 600,
+                background: diffLayout === "side-by-side" ? "var(--brand)" : "var(--surface)",
+                color: diffLayout === "side-by-side" ? "#fff" : "var(--text-secondary)",
+                borderRight: "1px solid var(--border)", cursor: "pointer",
+              }}
+              title="Side-by-side dual column comparison"
+            >
+              ⫴ Side-by-Side
+            </button>
+            <button
+              onClick={() => setDiffLayout("stacked")}
+              style={{
+                padding: "3px 8px", fontSize: "0.7rem", fontWeight: 600,
+                background: diffLayout === "stacked" ? "var(--brand)" : "var(--surface)",
+                color: diffLayout === "stacked" ? "#fff" : "var(--text-secondary)",
+                cursor: "pointer",
+              }}
+              title="Stacked vertical comparison"
+            >
+              ⫵ Stacked
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Dual-Column / Stacked Trees ── */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+        gridTemplateColumns: diffLayout === "side-by-side" ? "minmax(0, 1fr) minmax(0, 1fr)" : "1fr",
         gap: "var(--space-md)",
         minWidth: 0,
         maxWidth: "100%",
       }}>
-        {/* Left: Baseline Plan */}
+        {/* Baseline Plan */}
         <div className="glass-card-static" style={{ padding: "var(--space-md)", overflowX: "auto", minWidth: 0 }}>
           <div style={{
             display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -201,14 +313,16 @@ export function PlanDiffVisualizer({
           </div>
 
           {baseRoot ? (
-            <DiffNodeTree
-              node={baseRoot}
-              path="base"
-              collapsed={collapsedNodes}
-              onToggle={toggleNode}
-              side="base"
-              rootCost={baseCost}
-            />
+            <div style={{ minWidth: "100%", width: "max-content", paddingBottom: "var(--space-xs)" }}>
+              <DiffNodeTree
+                node={baseRoot}
+                path="base"
+                collapsed={collapsedNodes}
+                onToggle={toggleNode}
+                side="base"
+                rootCost={baseCost}
+              />
+            </div>
           ) : (
             <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", textAlign: "center", padding: "var(--space-lg)" }}>
               No plan tree available
@@ -216,7 +330,7 @@ export function PlanDiffVisualizer({
           )}
         </div>
 
-        {/* Right: Current Plan */}
+        {/* Current Plan */}
         <div className="glass-card-static" style={{ padding: "var(--space-md)", overflowX: "auto", minWidth: 0 }}>
           <div style={{
             display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -241,14 +355,16 @@ export function PlanDiffVisualizer({
           </div>
 
           {currentRoot ? (
-            <DiffNodeTree
-              node={currentRoot}
-              path="curr"
-              collapsed={collapsedNodes}
-              onToggle={toggleNode}
-              side="current"
-              rootCost={currentCost}
-            />
+            <div style={{ minWidth: "100%", width: "max-content", paddingBottom: "var(--space-xs)" }}>
+              <DiffNodeTree
+                node={currentRoot}
+                path="curr"
+                collapsed={collapsedNodes}
+                onToggle={toggleNode}
+                side="current"
+                rootCost={currentCost}
+              />
+            </div>
           ) : (
             <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", textAlign: "center", padding: "var(--space-lg)" }}>
               No plan tree available
@@ -287,9 +403,10 @@ function DiffNodeTree({
 
   const isSeqScan = (node["Node Type"] || "").toLowerCase().includes("seq scan");
   const isIndex = (node["Node Type"] || "").toLowerCase().includes("index");
+  const relation = node["Relation Name"] || node["Index Name"] || node["Alias"] || "";
 
   return (
-    <div style={{ marginLeft: path.split(".").length > 1 ? 16 : 0, marginTop: 8 }}>
+    <div style={{ marginTop: 8, minWidth: 280, boxSizing: "border-box" }}>
       <div
         style={{
           border: `1px solid ${style.border}`,
@@ -297,33 +414,47 @@ function DiffNodeTree({
           background: style.bg,
           padding: "8px 10px",
           transition: "all var(--transition-fast)",
+          boxSizing: "border-box",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
             {hasChildren && (
               <button
                 onClick={() => onToggle(path)}
                 style={{
                   background: "transparent", border: "none", cursor: "pointer",
-                  fontSize: "0.7rem", color: "var(--text-muted)", padding: 0,
+                  fontSize: "0.65rem", color: "var(--text-muted)", padding: "1px 3px",
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
                 }}
+                title={isCollapsed ? "Expand node" : "Collapse node"}
               >
                 {isCollapsed ? "▶" : "▼"}
               </button>
             )}
-            <span style={{ fontSize: "0.9rem" }}>{style.icon}</span>
-            <span style={{ fontWeight: 600, fontSize: "0.82rem", color: "var(--text-primary)", whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: "0.85rem", flexShrink: 0 }}>{style.icon}</span>
+            <span style={{
+              fontWeight: 600,
+              fontSize: "0.82rem",
+              color: "var(--text-primary)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              flexShrink: 0,
+            }}>
               {node["Node Type"]}
             </span>
 
-            {node["Relation Name"] && (
+            {relation && (
               <span style={{
-                fontSize: "0.72rem", fontFamily: "var(--font-mono)",
+                fontSize: "0.7rem", fontFamily: "var(--font-mono)",
                 background: "var(--surface)", border: "1px solid var(--border)",
-                padding: "1px 5px", borderRadius: 3, color: "var(--text-secondary)",
-              }}>
-                {node["Relation Name"]}
+                padding: "1px 6px", borderRadius: "var(--radius-sm)", color: "var(--text-secondary)",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                maxWidth: 130, flexShrink: 1,
+              }} title={relation}>
+                {relation}
               </span>
             )}
           </div>
@@ -331,25 +462,26 @@ function DiffNodeTree({
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
             {isSeqScan && (
               <span style={{
-                fontSize: "0.65rem", fontWeight: 700, padding: "1px 5px",
-                background: "rgba(239, 68, 68, 0.2)", color: "var(--signal-critical)",
-                borderRadius: 3,
+                fontSize: "0.62rem", fontWeight: 700, padding: "2px 6px",
+                background: "rgba(239, 68, 68, 0.18)", color: "var(--signal-critical)",
+                borderRadius: 3, whiteSpace: "nowrap", border: "1px solid rgba(239, 68, 68, 0.3)",
               }}>
                 SEQ SCAN
               </span>
             )}
             {isIndex && (
               <span style={{
-                fontSize: "0.65rem", fontWeight: 700, padding: "1px 5px",
-                background: "rgba(16, 185, 129, 0.2)", color: "var(--signal-healthy)",
-                borderRadius: 3,
+                fontSize: "0.62rem", fontWeight: 700, padding: "2px 6px",
+                background: "rgba(16, 185, 129, 0.18)", color: "var(--signal-healthy)",
+                borderRadius: 3, whiteSpace: "nowrap", border: "1px solid rgba(16, 185, 129, 0.3)",
               }}>
                 INDEX
               </span>
             )}
             <span style={{
-              fontSize: "0.75rem", fontFamily: "var(--font-mono)",
-              color: isHighCost ? "var(--signal-warning)" : "var(--text-muted)", fontWeight: isHighCost ? 700 : 400,
+              fontSize: "0.76rem", fontFamily: "var(--font-mono)",
+              color: isHighCost ? "var(--signal-warning)" : "var(--text-muted)", fontWeight: isHighCost ? 700 : 500,
+              whiteSpace: "nowrap",
             }}>
               {formatCost(nodeCost)}
             </span>
@@ -358,7 +490,7 @@ function DiffNodeTree({
 
         {/* Node details: index name, rows, condition */}
         <div style={{
-          marginTop: 6, paddingTop: 4, borderTop: "1px dashed rgba(255,255,255,0.06)",
+          marginTop: 6, paddingTop: 4, borderTop: "1px dashed var(--border)",
           fontSize: "0.72rem", color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 2,
         }}>
           {node["Index Name"] && (
@@ -385,12 +517,24 @@ function DiffNodeTree({
               <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.68rem" }}>{node["Index Cond"]}</code>
             </div>
           )}
+          {node["Hash Cond"] && (
+            <div style={{ wordBreak: "break-all" }}>
+              <strong style={{ color: "var(--brand)" }}>Hash Cond: </strong>
+              <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.68rem" }}>{node["Hash Cond"]}</code>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Children */}
       {!isCollapsed && hasChildren && (
-        <div style={{ borderLeft: "1px dashed var(--border)", marginLeft: 8, paddingLeft: 4 }}>
+        <div style={{
+          borderLeft: "1.5px dashed var(--border)",
+          marginLeft: 10,
+          paddingLeft: 10,
+          display: "flex",
+          flexDirection: "column",
+        }}>
           {node.Plans!.map((child, idx) => (
             <DiffNodeTree
               key={`${path}.${idx}`}
