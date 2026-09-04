@@ -144,6 +144,7 @@ export function isQueryTruncated(queryText: string): boolean {
           i++; // skip escaped quote ''
         } else {
           inSingleQuote = false;
+          codeWithoutComments += "'str'";
         }
       }
       continue;
@@ -183,14 +184,14 @@ export function isQueryTruncated(queryText: string): boolean {
 
   const cleanCode = codeWithoutComments.trim();
 
-  // Check for trailing punctuation / opening brackets that cannot end a valid statement
-  if (/[,(\[]\s*$/.test(cleanCode)) {
+  // Check for trailing punctuation / opening brackets / operators that cannot end a valid statement
+  if (/[,(\[+\-*\/=<>|!~:]\s*$/.test(cleanCode)) {
     return true;
   }
 
   // Check for trailing clause keywords or operators that indicate cut-off SQL
   if (
-    /\b(WHERE|AND|OR|JOIN|ON|FROM|SELECT|SET|VALUES|IN|BETWEEN|AS|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET)\s*$/i.test(
+    /\b(WHERE|AND|OR|JOIN|ON|FROM|SELECT|SET|VALUES|IN|BETWEEN|AS|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|CASE|WHEN|THEN|ELSE|WITH|UNION|ALL|DISTINCT|NOT|IS|LIKE|ILIKE|OVER)\s*$/i.test(
       cleanCode
     )
   ) {
@@ -297,6 +298,9 @@ export function substituteQueryParameters(
     }
     return match;
   });
+
+  // 4f. INTERVAL $N -> INTERVAL '1 second'
+  modified = modified.replace(/\bINTERVAL\s+\$\d+\b/gi, "INTERVAL '1 second'");
 
   // 5. Replace remaining $N with fallback based on requested default
   let fallbackVal: string;

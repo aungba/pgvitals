@@ -75,6 +75,16 @@ describe("Explain Executor Library", () => {
       expect(isQueryTruncated("SELECT * FROM users WHERE")).toBe(true);
       expect(isQueryTruncated("SELECT * FROM users WHERE id = 1 AND")).toBe(true);
       expect(isQueryTruncated("SELECT * FROM users JOIN roles ON")).toBe(true);
+      expect(isQueryTruncated("SELECT * FROM users WHERE id = 1 +")).toBe(true);
+      expect(isQueryTruncated("SELECT col FROM users WHERE CASE")).toBe(true);
+      expect(isQueryTruncated("SELECT col FROM users WHERE CASE WHEN a = 1 THEN")).toBe(true);
+      expect(
+        isQueryTruncated(`
+          SELECT tnt025.syskey,
+                 CASE WHEN a = 1 THEN 'ok' END AS aging,
+                 CASE
+        `)
+      ).toBe(true);
     });
 
     it("does not false-positive on comments with parentheses or apostrophes", () => {
@@ -185,6 +195,13 @@ describe("Explain Executor Library", () => {
       const substituted = substituteQueryParameters(query, "string");
       expect(substituted).toContain("TO_CHAR(COALESCE(t.created_at, NOW()), 'YYYY-MM-DD')");
       expect(substituted).toContain("JOIN table_b ON (true)");
+    });
+
+    it("replaces INTERVAL parameters with valid interval literals", () => {
+      const query = "SELECT now() + INTERVAL $1 + 10 * INTERVAL $2";
+      const substituted = substituteQueryParameters(query, "null");
+      expect(substituted).toContain("INTERVAL '1 second'");
+      expect(substituted).not.toContain("INTERVAL NULL");
     });
 
     it("supports various fallback defaults", () => {
