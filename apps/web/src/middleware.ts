@@ -2,7 +2,8 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import type { NextRequest, NextFetchEvent } from "next/server";
 
-const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const isE2ETest = process.env.NEXT_PUBLIC_E2E === "true" || process.env.PLAYWRIGHT_TEST === "true";
+const clerkEnabled = !isE2ETest && !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 const isPublicRoute = createRouteMatcher([
   "/",

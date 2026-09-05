@@ -10,6 +10,7 @@ import { estimatePercentiles } from "../collector/percentile-calculator.js";
 import { authMiddleware, requireRole } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/plan-limits.js";
 import { analyzePlanRegression } from "../collector/plan-regression-collector.js";
+import { optimizeQueryWithAi } from "../collector/ai-query-optimizer.js";
 
 /* ===================================================================
    Query Performance Routes — Phase 4
@@ -778,6 +779,50 @@ export default async function queryRoutes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         request.log.error({ err }, "Failed to get I/O diagnostics");
         return reply.status(500).send({ error: "Failed to get I/O diagnostics" });
+      }
+    }
+  );
+
+  /**
+   * POST /api/databases/:id/queries/ai-optimize
+   * AI-Powered Query Explainer & Rewriter
+   */
+  app.post<{
+    Params: { id: string };
+    Body: {
+      queryText: string;
+      planJson?: any;
+      meanLatencyMs?: number;
+      calls?: number;
+    };
+  }>(
+    "/api/databases/:id/queries/ai-optimize",
+    { preHandler: [authMiddleware] },
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+        const orgId = request.auth.orgId;
+
+        if (!(await verifyDbOwnership(id, orgId))) {
+          return reply.status(404).send({ error: "Database not found" });
+        }
+
+        const { queryText, planJson, meanLatencyMs, calls } = request.body || {};
+        if (!queryText || typeof queryText !== "string" || !queryText.trim()) {
+          return reply.status(400).send({ error: "queryText is required" });
+        }
+
+        const result = await optimizeQueryWithAi({
+          queryText,
+          planJson,
+          meanLatencyMs,
+          calls,
+        });
+
+        return reply.send(result);
+      } catch (err: any) {
+        request.log.error({ err }, "Failed to optimize query with AI");
+        return reply.status(500).send({ error: "Failed to optimize query with AI" });
       }
     }
   );

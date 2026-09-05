@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { setGlobalTokenGetter } from "./tokenStore";
 
-const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const isE2ETest = process.env.NEXT_PUBLIC_E2E === "true" || process.env.PLAYWRIGHT_TEST === "true";
+const clerkEnabled = !isE2ETest && !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 /**
  * Hook that returns a function to get the current Clerk session token,
@@ -51,6 +52,9 @@ export function useApiToken(): { getToken: () => Promise<string | undefined>; is
 
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const fn = useCallback(async (): Promise<string | undefined> => {
+    if (typeof window !== "undefined" && (navigator.webdriver || (window as any).__E2E__)) {
+      return undefined;
+    }
     if (!isLoaded) return undefined;
     try {
       const token = await getToken();
@@ -60,5 +64,6 @@ export function useApiToken(): { getToken: () => Promise<string | undefined>; is
     }
   }, [getToken, isLoaded]);
 
-  return { getToken: fn, isReady: isLoaded };
+  const isE2E = typeof window !== "undefined" && (navigator.webdriver || (window as any).__E2E__);
+  return { getToken: fn, isReady: isE2E ? true : isLoaded };
 }

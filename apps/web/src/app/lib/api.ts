@@ -133,9 +133,12 @@ async function request<T>(
   // If no token yet and Clerk is configured, wait for it to load.
   // window.Clerk becomes available once the Clerk JS bundle loads,
   // which may be after the first React render cycle.
-  const clerkConfigured = typeof window !== "undefined" &&
-    !!(window as any).__clerk_publishable_key ||
-    !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const isE2E = (typeof window !== "undefined" && (navigator.webdriver || (window as any).__E2E__)) ||
+    process.env.NEXT_PUBLIC_E2E === "true" || process.env.PLAYWRIGHT_TEST === "true";
+  const clerkConfigured = !isE2E && (
+    (typeof window !== "undefined" && !!(window as any).__clerk_publishable_key) ||
+    !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+  );
 
   if (!token && clerkConfigured) {
     for (let attempt = 0; attempt < 20; attempt++) {
@@ -248,7 +251,7 @@ export async function getSnapshots(
     `/api/databases/${id}/snapshots?${params.toString()}`,
     { token },
   );
-  return data.snapshots;
+  return data.snapshots ?? [];
 }
 
 export interface MetricRollup {
@@ -333,7 +336,7 @@ export async function getHints(
   const qs = params.toString();
   const url = `/api/databases/${id}/hints${qs ? `?${qs}` : ""}`;
   const data = await request<HintsResponse>(url, { token });
-  return data.hints;
+  return data.hints ?? [];
 }
 
 /* ---------- Alert Types ---------- */
@@ -387,7 +390,7 @@ export async function getActiveAlerts(dbId: string, token?: string): Promise<Ale
     `/api/databases/${dbId}/alerts/active`,
     { token },
   );
-  return data.alerts;
+  return data.alerts ?? [];
 }
 
 export async function getAlertRules(dbId: string, token?: string): Promise<AlertRule[]> {
@@ -1179,4 +1182,114 @@ export interface BillingStatus {
 export async function getBillingStatus(token?: string): Promise<BillingStatus> {
   return request<BillingStatus>("/api/billing/status", { token });
 }
+
+/* ---------- GUC Configuration Advisor (PGTune) ---------- */
+
+export interface HardwareProfile {
+  totalRamGb: number;
+  cpuCores: number;
+  diskType: "ssd" | "hdd" | "san";
+  workloadType: "web" | "oltp" | "dw" | "mixed" | "desktop";
+  maxConnections?: number;
+}
+
+export interface GucRecommendation {
+  name: string;
+  category: "memory" | "wal" | "storage" | "parallelism" | "diagnostics";
+  currentValue: string;
+  currentValueFormatted: string;
+  recommendedValue: string;
+  recommendedValueFormatted: string;
+  status: "optimal" | "warning" | "critical" | "info";
+  restartRequired: boolean;
+  context: string;
+  unit: string | null;
+  reason: string;
+}
+
+export interface GucAdviceReport {
+  profile: HardwareProfile;
+  summary: {
+    totalEvaluated: number;
+    optimalCount: number;
+    warningCount: number;
+    criticalCount: number;
+    restartRequiredCount: number;
+  };
+  recommendations: GucRecommendation[];
+  alterSystemSql: string;
+  postgresqlConfSnippet: string;
+}
+
+export interface GucAdviceResponse {
+  databaseId: string;
+  databaseName: string;
+  report: GucAdviceReport;
+}
+
+export async function getGucAdvice(
+  dbId: string,
+  params?: {
+    totalRamGb?: number;
+    cpuCores?: number;
+    diskType?: string;
+    workloadType?: string;
+    maxConnections?: number;
+  },
+  token?: string
+): Promise<GucAdviceResponse> {
+  const q = new URLSearchParams();
+  if (params?.totalRamGb) q.set("totalRamGb", params.totalRamGb.toString());
+  if (params?.cpuCores) q.set("cpuCores", params.cpuCores.toString());
+  if (params?.diskType) q.set("diskType", params.diskType);
+  if (params?.workloadType) q.set("workloadType", params.workloadType);
+  if (params?.maxConnections) q.set("maxConnections", params.maxConnections.toString());
+
+  const qs = q.toString() ? `?${q.toString()}` : "";
+  return request<GucAdviceResponse>(`/api/databases/${dbId}/guc-advice${qs}`, { token });
+}
+
+/* ---------- AI Query Explainer & Rewriter ---------- */
+
+export interface QueryBottleneck {
+  title: string;
+  severity: "info" | "warning" | "critical";
+  explanation: string;
+  suggestion: string;
+}
+
+export interface RecommendedIndex {
+  tableName: string;
+  indexDdl: string;
+  reason: string;
+}
+
+export interface AiOptimizationResult {
+  summary: string;
+  bottlenecks: QueryBottleneck[];
+  rewrittenSql: string;
+  recommendedIndexes: RecommendedIndex[];
+  estimatedSpeedup: string;
+  provider: "gemini" | "openai" | "heuristic";
+}
+
+export interface AiOptimizePayload {
+  queryText: string;
+  planJson?: any;
+  meanLatencyMs?: number;
+  calls?: number;
+}
+
+export async function optimizeQueryWithAi(
+  dbId: string,
+  payload: AiOptimizePayload,
+  token?: string
+): Promise<AiOptimizationResult> {
+  return request<AiOptimizationResult>(`/api/databases/${dbId}/queries/ai-optimize`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    token,
+  });
+}
+
 

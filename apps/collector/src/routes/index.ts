@@ -12,6 +12,7 @@ import orgRoutes from "./org.js";
 import schemaEventRoutes from "./schema-events.js";
 import poolerRoutes from "./pooler.js";
 import remediationRoutes from "./remediation.js";
+import gucRoutes from "./guc-advisor.js";
 
 /**
  * Fastify plugin that registers all API route handlers.
@@ -30,4 +31,5 @@ export default async function routes(app: FastifyInstance): Promise<void> {
   await app.register(schemaEventRoutes);
   await app.register(poolerRoutes);
   await app.register(remediationRoutes);
+  await app.register(gucRoutes);
 }

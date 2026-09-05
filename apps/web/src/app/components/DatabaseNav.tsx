@@ -20,6 +20,7 @@ const tabs = [
   { label: "Plans", segment: "/plans", icon: "📈" },
   { label: "Schema", segment: "/schema", icon: "🏗️" },
   { label: "Pooler", segment: "/pooler", icon: "🔀" },
+  { label: "Config", segment: "/config", icon: "⚙️" },
 ];
 
 export default function DatabaseNav() {

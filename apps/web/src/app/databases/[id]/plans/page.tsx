@@ -24,6 +24,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { useChartColors } from "../../../lib/useChartColors";
+import AiQueryModal from "../../../components/AiQueryModal";
 
 /* ===================================================================
    Plan Regression & EXPLAIN Visualizer — Enhanced UI
@@ -83,6 +84,7 @@ export default function PlansPage() {
   const [pasteText, setPasteText] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
+  const [showAiModal, setShowAiModal] = useState(false);
 
   // Custom Parameter Binding Modal State
   const [showParamModal, setShowParamModal] = useState(false);
@@ -637,6 +639,25 @@ export default function PlansPage() {
                       ⚙️ Bind Parameters {detectedParams.length > 0 && `(${detectedParams.length})`}
                     </button>
 
+                    <button
+                      onClick={() => setShowAiModal(true)}
+                      className="btn-secondary"
+                      style={{
+                        fontSize: "0.8rem",
+                        padding: "8px 12px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        backgroundColor: "var(--brand-dim)",
+                        color: "var(--brand)",
+                        border: "1px solid var(--brand)",
+                        fontWeight: 600,
+                      }}
+                      title="Analyze plan bottlenecks and rewrite query with AI"
+                    >
+                      🤖 AI Optimize
+                    </button>
+
                     {pastedPlan && (
                       <button
                         onClick={() => setPastedPlan(null)}
@@ -1038,6 +1059,19 @@ export default function PlansPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI Query & Plan Optimizer Modal */}
+      {selectedQuery && (
+        <AiQueryModal
+          isOpen={showAiModal}
+          onClose={() => setShowAiModal(false)}
+          dbId={id}
+          queryText={selectedQuery.queryText}
+          planJson={currentSnapshot?.planJson ?? pastedPlan ?? undefined}
+          meanLatencyMs={selectedQuery.meanTimeMs}
+          calls={selectedQuery.calls}
+        />
       )}
     </div>
   );

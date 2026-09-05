@@ -32,6 +32,7 @@ import {
 import { useChartColors } from "../../../lib/useChartColors";
 import { analyzeSqlAdvice } from "../../../lib/sqlAdvisor";
 import Link from "next/link";
+import AiQueryModal from "../../../components/AiQueryModal";
 
 /* ===================================================================
    Query Performance Page — Enhanced UI Design & Diagnostics Suite
@@ -140,6 +141,7 @@ export default function QueriesPage() {
   const [simResult, setSimResult] = useState<IndexSimulationResult | null>(null);
   const [simError, setSimError] = useState<string | null>(null);
   const [showSimModal, setShowSimModal] = useState(false);
+  const [showAiModal, setShowAiModal] = useState(false);
 
   // Suggestions state
   const [suggestions, setSuggestions] = useState<QuerySuggestion[]>([]);
@@ -1254,8 +1256,8 @@ export default function QueriesPage() {
                     </div>
                   )}
 
-                  {/* Actions: EXPLAIN and HypoPG Simulation */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-sm)", marginBottom: "var(--space-md)" }}>
+                  {/* Actions: EXPLAIN, HypoPG Simulation, and AI Optimize */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--space-sm)", marginBottom: "var(--space-md)" }}>
                     <button className="btn-primary" onClick={handleExplain} disabled={explainLoading} style={{ width: "100%", fontSize: "0.85rem" }}>
                       {explainLoading ? "Running EXPLAIN…" : "📋 Run EXPLAIN"}
                     </button>
@@ -1265,6 +1267,25 @@ export default function QueriesPage() {
                       style={{ width: "100%", fontSize: "0.85rem" }}
                     >
                       🧪 HypoPG Test
+                    </button>
+                    <button
+                      onClick={() => setShowAiModal(true)}
+                      style={{
+                        width: "100%",
+                        fontSize: "0.85rem",
+                        backgroundColor: "var(--brand)",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "var(--radius-sm)",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      🤖 AI Optimize
                     </button>
                   </div>
 
@@ -1365,6 +1386,19 @@ export default function QueriesPage() {
             )}
           </div>
         </>
+      )}
+
+      {/* AI Query Optimizer Modal */}
+      {selectedQuery && (
+        <AiQueryModal
+          isOpen={showAiModal}
+          onClose={() => setShowAiModal(false)}
+          dbId={id}
+          queryText={selectedQuery.queryText}
+          planJson={explains[0]?.planJson ?? undefined}
+          meanLatencyMs={selectedQuery.meanTimeMs}
+          calls={selectedQuery.calls}
+        />
       )}
     </div>
   );

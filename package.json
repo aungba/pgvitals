@@ -12,7 +12,9 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "pnpm --filter @pgvitals/web test:e2e",
+    "test:e2e:ui": "pnpm --filter @pgvitals/web test:e2e:ui"
   },
   "engines": {
     "node": ">=20.0.0"

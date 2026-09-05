@@ -35,6 +35,5 @@ deplo.txt
 deploy.txt
 jenkins_deploy_log.txt
 *.png
-
-
-
+test-results/
+playwright-report/
