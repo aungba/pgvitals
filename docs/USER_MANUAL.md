@@ -13,13 +13,17 @@ Welcome to the **PG Vitals User Manual**. This guide provides complete documenta
 5. [Plan Regression & EXPLAIN Visualizer](#5-plan-regression--explain-visualizer)
 6. [VACUUM Health, Bloat & Storage Management](#6-vacuum-health-bloat--storage-management)
 7. [Log Insights, Deadlocks & Replication](#7-log-insights-deadlocks--replication)
-8. [Alerts & Multi-Channel Integrations](#8-alerts--multi-channel-integrations)
-9. [Tail Latencies (P95/P99) & Storage I/O Diagnostics](#9-tail-latencies-p95p99--storage-io-diagnostics)
-10. [Autovacuum Starvation & Worker Contention Sentinel](#10-autovacuum-starvation--worker-contention-sentinel)
-11. [Remote Remediation & Slack ChatOps](#11-remote-remediation--slack-chatops)
-12. [Production DBA Sentinel Suite](#12-production-dba-sentinel-suite)
-13. [Root Cause Hints & Incident Audit Logs](#13-root-cause-hints--incident-audit-logs)
-14. [Developer API & Interactive OpenAPI Explorer](#14-developer-api--interactive-openapi-explorer)
+8. [Connection Pooler & PgBouncer Monitoring](#8-connection-pooler--pgbouncer-monitoring)
+9. [Schema Explorer & Table Inspector](#9-schema-explorer--table-inspector)
+10. [Alerts & Multi-Channel Integrations](#10-alerts--multi-channel-integrations)
+11. [Tail Latencies (P95/P99) & Storage I/O Diagnostics](#11-tail-latencies-p95p99--storage-io-diagnostics)
+12. [Autovacuum Starvation & Worker Contention Sentinel](#12-autovacuum-starvation--worker-contention-sentinel)
+13. [Remote Remediation & Slack ChatOps](#13-remote-remediation--slack-chatops)
+14. [Production DBA Sentinel Suite](#14-production-dba-sentinel-suite)
+15. [Root Cause Hints & Incident Audit Logs](#15-root-cause-hints--incident-audit-logs)
+16. [Teams, Roles & Subscription Billing](#16-teams-roles--subscription-billing)
+17. [Developer API & Interactive OpenAPI Explorer](#17-developer-api--interactive-openapi-explorer)
+18. [UI/UX Navigation & Usability Enhancements](#18-uiux-navigation--usability-enhancements)
 
 ---
 
@@ -222,18 +226,54 @@ Located at: `/databases/[id]/logs` and `/databases/[id]/health` (Replication tab
 
 ---
 
-## 8. Alerts & Multi-Channel Integrations
+## 8. Connection Pooler & PgBouncer Monitoring
+
+Located at: `/databases/[id]/pooler`
+
+### 8.1 Multiplexing Efficiency & Client Telemetry
+- **Frontend vs. Backend Ratio**: Measures how efficiently incoming client connections (from web and worker containers) are multiplexed into small pools of persistent PostgreSQL backend connections.
+- **Client Waiting Counter**: Real-time counter of client queries queued waiting for an available server connection. Any count $> 0$ indicates pool starvation.
+- **Pool Modes**: Identifies whether the pool operates in `Transaction` mode (recommended for stateless APIs), `Session` mode, or `Statement` mode.
+
+### 8.2 Safe ORM Configuration & Tuning
+- When running in **Transaction Mode**, configure your ORMs (e.g. Prisma, TypeORM, Hibernate) with `pgbouncer=true` or disable prepared statement caching to avoid duplicate prepared statement collisions across shared sessions.
+- Recommended baseline configuration for high-concurrency workloads:
+  ```ini
+  [databases]
+  mydb = host=127.0.0.1 port=5432 dbname=mydb pool_mode=transaction
+
+  [pgbouncer]
+  max_client_conn = 2000
+  default_pool_size = 50
+  reserve_pool_size = 10
+  reserve_pool_timeout = 5
+  ```
+
+---
+
+## 9. Schema Explorer & Table Inspector
+
+Located at: `/databases/[id]/schema`
+
+### 9.1 Schema Catalog & Physical Disk Breakdown
+- **Table vs. Index Footprint**: Visualizes exact on-disk byte distribution separating raw table heap data from secondary B-Tree and GIN indexes.
+- **Cache Hit Efficiency**: Calculates `heap_blks_hit / (heap_blks_hit + heap_blks_read)` per relation. Tables operating below $95\%$ cache hit ratio indicate heavy random disk reads.
+- **Foreign Key & Constraint Inspector**: Surfaces unindexed foreign key columns that cause table-wide lock escalation during parent row deletions and updates.
+
+---
+
+## 10. Alerts & Multi-Channel Integrations
 
 Located at: `/databases/[id]/alerts`
 
-### 8.1 Supported Notification Channels
+### 10.1 Supported Notification Channels
 - **Slack**: Webhook alerts with formatted rich message blocks.
 - **Email (SMTP)**: HTML incident notifications with root cause context.
 - **PagerDuty**: Events API v2 integration for on-call paging.
 - **Microsoft Teams**: Office 365 / Adaptive Cards webhook payloads.
 - **Generic Webhook**: Custom JSON POST with HMAC-SHA256 request signing.
 
-### 8.2 Built-In Alert Rules
+### 10.2 Built-In Alert Rules
 - `connection_spike`: Active connections $> 85\%$ of `max_connections`.
 - `pool_exhaustion`: PgBouncer clients waiting $> 0$.
 - `deadlock_storm`: Deadlock count increase $> 0$.
@@ -247,51 +287,51 @@ Located at: `/databases/[id]/alerts`
 
 ---
 
-## 9. Tail Latencies (P95/P99) & Storage I/O Diagnostics
+## 11. Tail Latencies (P95/P99) & Storage I/O Diagnostics
 
 Located at: `/databases/[id]/queries` (Percentiles & I/O tabs)
 
-### 9.1 Directional Percentile Estimation ($P_{50}, P_{95}, P_{99}$)
+### 11.1 Directional Percentile Estimation ($P_{50}, P_{95}, P_{99}$)
 - PG Vitals models continuous log-normal query latency distributions bounded by $[min, max]$ from `pg_stat_statements`.
 - **Variance Ratio**: Computes $(max - mean) / mean$ to highlight queries with extreme tail spikes.
 - **High Variance Flag**: Instantly tags queries with $> 10\times$ variance spikes and $max > 500$ms.
 
-### 9.2 Disk vs. CPU Bottleneck Classification (`track_io_timing`)
+### 11.2 Disk vs. CPU Bottleneck Classification (`track_io_timing`)
 - Checks `track_io_timing` in PostgreSQL engine settings.
 - If enabled, measures block read and write times per query (`blk_read_time` + `blk_write_time`).
 - **I/O Stall Detection**: Flags queries spending $\ge 45\%$ of total execution time waiting on storage disk reads/writes with actionable remediation advice (e.g. creating indexes to replace sequential disk scans or provisioning higher AWS EBS IOPS).
 
 ---
 
-## 10. Autovacuum Starvation & Worker Contention Sentinel
+## 12. Autovacuum Starvation & Worker Contention Sentinel
 
 Located at: `/databases/[id]/health` (Autovacuum tab)
 
-### 10.1 Worker Contention & Pool Saturation
+### 12.1 Worker Contention & Pool Saturation
 - Compares active `autovacuum:` workers in `pg_stat_activity` against `autovacuum_max_workers`.
 - Identifies when all background worker slots are saturated by long-running maintenance jobs.
 
-### 10.2 Starved Table Candidate Identification
+### 12.2 Starved Table Candidate Identification
 - Surfaces tables accumulating $> 10,000$ dead tuples with a dead tuple ratio $> 20\%$.
 - Generates proactive tuning guidance (e.g. increasing `autovacuum_max_workers`, raising `autovacuum_vacuum_cost_limit`, or running manual `VACUUM ANALYZE`).
 
 ---
 
-## 11. Remote Remediation & Slack ChatOps
+## 13. Remote Remediation & Slack ChatOps
 
-### 11.1 Safe Session Cancellation API
+### 13.1 Safe Session Cancellation API
 - **Endpoint**: `POST /api/databases/:id/sessions/:pid/terminate`
 - **Role Requirement**: Requires `admin` or `owner` privileges within the organization.
 - Executes `SELECT pg_terminate_backend(pid)` to abort rogue blocking queries or orphan connections.
 
-### 11.2 Interactive Slack Alerts & In-Channel Resolution
+### 13.2 Interactive Slack Alerts & In-Channel Resolution
 - When a blocking chain exceeds the 30-second threshold, PG Vitals sends an interactive Block Kit card to Slack.
 - **Terminate Blocker Action**: Authorized team members can click **⚡ Terminate Blocker** with confirmation dialog.
 - Validates `X-Slack-Signature` HMAC tokens and updates the Slack alert card in real-time with the acting operator's handle.
 
 ---
 
-## 12. Production DBA Sentinel Suite
+## 14. Production DBA Sentinel Suite
 
 Summary of automated protections operating across polling cycles:
 
@@ -307,11 +347,11 @@ Summary of automated protections operating across polling cycles:
 
 ---
 
-## 13. Root Cause Hints & Incident Audit Logs
+## 15. Root Cause Hints & Incident Audit Logs
 
 Located at: `/databases/[id]/hints` (with live preview widget on `/databases/[id]`)
 
-### 13.1 Automated Root Cause Detection Rules
+### 15.1 Automated Root Cause Detection Rules
 PG Vitals continuously evaluates 7 heuristic diagnostic rules during every collection cycle:
 - **Idle in Transaction (`idle_in_transaction_long`)**: Surfaces sessions holding idle transactions $> 300\text{s}$.
 - **Connection Hog (`connection_hog`)**: Detects a single client application consuming $> 70\%$ of available connections.
@@ -321,11 +361,11 @@ PG Vitals continuously evaluates 7 heuristic diagnostic rules during every colle
 - **Lock Contention Storm (`micro_query_lock_storm`)**: Identifies high-frequency concurrency storms on hot table rows.
 - **Lock Queue Storm (`lock_queue_storm`)**: Alerts on cascading lock queues ($\ge 2$ sessions queued behind a root blocker).
 
-### 13.2 Dashboard Widget & Live Incident Feed
+### 15.2 Dashboard Widget & Live Incident Feed
 - Displays the most recent active hints next to the Connection Utilization gauge.
 - Includes a direct link `View Full Logs & History →` to jump straight to historical logs.
 
-### 13.3 Historical Audit Log & Inspector
+### 15.3 Historical Audit Log & Inspector
 - **Timeframe Selector**: Filter incident history across `1h`, `24h`, `7d`, `30d`, or `All Time`.
 - **Multi-Filter & Search**: Filter by Severity (`Critical` / `Warning`), Rule Type, or search by PID, application name, or SQL snippet.
 - **Incident Inspector Drawer**: Click any incident row to inspect:
@@ -337,15 +377,31 @@ PG Vitals continuously evaluates 7 heuristic diagnostic rules during every colle
 
 ---
 
-## 14. Developer API & Interactive OpenAPI Explorer
+## 16. Teams, Roles & Subscription Billing
+
+Located at: `/settings/team` and `/settings/billing`
+
+### 16.1 Granular Role-Based Access Control (RBAC)
+- **Owner**: Full administrative control across the organization, including member invitation/removal, Stripe billing management, database registration, and session termination.
+- **Admin**: Can register and configure monitored databases, adjust alert thresholds, simulate indexes with HypoPG, and terminate runaway sessions.
+- **Member**: Read-only visibility into database overview gauges, query performance tables, index recommendations, and audit logs. Cannot execute session terminations or alter configurations.
+
+### 16.2 Subscription Tiers
+- **Free ($0)**: 1 Monitored Database, 1 User Seat, 24-hour telemetry retention.
+- **Pro ($39/mo or $31/mo annual)**: Up to 5 Databases, 3 Seats, 30-day retention, Index Advisor, VACUUM Bloat Sentinel, Slack/Email alerts.
+- **Team ($149/mo or $119/mo annual)**: Up to 20 Databases, Unlimited Seats, 90-day retention, Multi-environment grouping, Log Insights, Slack ChatOps, Priority SLA.
+
+---
+
+## 17. Developer API & Interactive OpenAPI Explorer
 
 PG Vitals exposes a fully documented REST and Server-Sent Events API powered by Fastify and OpenAPI 3.1.
 
-### 14.1 Interactive Documentation Portal
+### 17.1 Interactive Documentation Portal
 - **Swagger UI**: Visit `http://localhost:3001/documentation` (or your production collector URL) to explore and test endpoints interactively.
 - **OpenAPI 3.1 Spec**: Available in JSON format at `/openapi.json` for client SDK generation.
 
-### 14.2 Key Endpoints
+### 17.2 Key Endpoints
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
@@ -356,36 +412,36 @@ PG Vitals exposes a fully documented REST and Server-Sent Events API powered by 
 | `GET` | `/api/databases/:id/indexes` | Lists unused, duplicate, invalid (`indisvalid = false`), and bloat-affected indexes. |
 | `GET` | `/api/databases/:id/health` | Comprehensive vacuum, bloat, autovacuum starvation, and WAL velocity health metrics. |
 
-### 14.3 Target Database Connection Pooling & Safety
+### 17.3 Target Database Connection Pooling & Safety
 - **LRU Client Pool**: The collector caches target database connections with automatic 3-minute idle eviction to minimize connection churn on monitored instances.
 - **Session Read-Only Enforcement**: All diagnostic queries execute with `default_transaction_read_only = on` and query timeout safeguards, guaranteeing non-intrusive monitoring.
 
-### 14.4 High-Throughput Session Broadcasting & Storage Optimization
+### 17.4 High-Throughput Session Broadcasting & Storage Optimization
 - **In-Memory Pub/Sub Hub**: Real-time SSE streaming utilizes a centralized `sessionBroadcaster` event hub, ensuring $O(1)$ database query overhead regardless of how many client dashboard tabs are open.
 - **Storage Bloat Elimination**: Omits redundant session JSON payloads from `snapshots.rawPayload`, preventing WAL write amplification and disk bloat on high-frequency collection intervals.
 - **Chunked Bulk Ingestion**: Ingests snapshot sessions in safe batches of 250 rows to maintain low memory footprints and stay well below PostgreSQL parameter boundaries.
 
-### 14.5 Security, Secret Encryption & Query Redaction
+### 17.5 Security, Secret Encryption & Query Redaction
 - **Strict Production CORS**: Enforces strict origin validation in production environments, matching against configured `ALLOWED_ORIGINS` and `DASHBOARD_BASE_URL`.
 - **Envelope Key Provider Interface**: Implements a pluggable `KeyProvider` architecture supporting versioned key storage (`v1:iv:authTag:ciphertext`) with AWS KMS, GCP KMS, and Vault extensibility.
 - **PII & Comment Sanitization**: SQL text sanitization redacts sensitive credentials in comments (`-- password=...`, `/* token: ... */`), nested JSON payloads, and array literals before storage.
 
 ---
 
-## 15. UI/UX Navigation & Usability Enhancements
+## 18. UI/UX Navigation & Usability Enhancements
 
-### 15.1 Sticky Sub-Navigation Bar
+### 18.1 Sticky Sub-Navigation Bar
 - The database navigation tab bar (`Overview`, `Hints`, `Queries`, `Indexes`, `Health`, `Alerts`, `Logs`, `Plans`, `Schema`, `Pooler`) is permanently pinned to the top of the viewport with a blurred glassmorphic surface (`backdrop-filter: blur(16px)`).
 - Subpage switching is immediately accessible regardless of how far down a table or timeline you scroll.
 
-### 15.2 Sticky Table Headers
+### 18.2 Sticky Table Headers
 - Long tabular data views (`Active Sessions`, `Query Performance`, `Table Bloat Stats`, `Log Insights`) pin column headers to the top of their scrollable containers.
 - Column headers remain visible when sorting or inspecting hundreds of active connections or table bloat records.
 
-### 15.3 Quick Return-to-Top Floating Button
+### 18.3 Quick Return-to-Top Floating Button
 - A floating `↑ Top` button appears in the bottom-right corner when scrolled past 350px, providing instant smooth scrolling back to high-level metric cards and performance charts.
 
-### 15.4 Universal Number Formatting
+### 18.4 Universal Number Formatting
 - Every metric, table count, vacuum frequency, and chart coordinate renders with standardized locale formatting (`1,234,567`) for readability across large database instances.
 
 
