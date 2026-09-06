@@ -71,6 +71,7 @@ pipeline {
                 echo 'Installing pnpm and dependencies...'
                 sh '''
                     export PNPM_STORE_DIR=/tmp/.pnpm-store
+                    export CI=true
                     corepack enable
                     corepack prepare pnpm@latest --activate
                     pnpm install --frozen-lockfile || pnpm install --frozen-lockfile --ignore-scripts
