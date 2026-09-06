@@ -116,16 +116,16 @@ export default function FAQPage() {
 
       <PublicNav />
 
-      <main className="landing-container" style={{ padding: "120px 24px 80px", maxWidth: 960 }}>
+      <main className="landing-container" style={{ padding: "44px 24px 72px", maxWidth: 960 }}>
         {/* Header */}
-        <div style={{ textAlign: "center", marginBottom: 40 }}>
-          <div className="landing-hero-badge" style={{ margin: "0 auto 16px" }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div className="landing-hero-badge" style={{ margin: "0 auto 12px" }}>
             <span>❓ Frequently Asked Questions</span>
           </div>
-          <h1 style={{ fontSize: "2.8rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 16 }}>
+          <h1 style={{ fontSize: "2.5rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 12 }}>
             Got Questions? We’ve Got Answers.
           </h1>
-          <p style={{ fontSize: "1.15rem", color: "var(--text-secondary)", maxWidth: 600, margin: "0 auto" }}>
+          <p style={{ fontSize: "1.05rem", color: "var(--text-secondary)", maxWidth: 600, margin: "0 auto" }}>
             Everything you need to know about PG Vitals architecture, database overhead, security guarantees, and query diagnostics.
           </p>
         </div>

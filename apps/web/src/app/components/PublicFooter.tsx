@@ -23,7 +23,7 @@ export default function PublicFooter() {
             <h4>Product</h4>
             <Link href="/#features">Features</Link>
             <Link href="/#preview">Live Demo</Link>
-            <Link href="/#pricing">Pricing</Link>
+            <Link href="/pricing">Pricing</Link>
             <Link href="/security">Security</Link>
           </div>
           <div className="footer-col">

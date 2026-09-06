@@ -48,7 +48,7 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
           : org?.planTier === "pro"
             ? 5
             : org?.planTier === "team"
-              ? Infinity
+              ? null // null represents unlimited database capacity in JSON
               : 1;
 
         return reply.send({

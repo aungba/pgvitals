@@ -18,7 +18,7 @@ export default function PublicNav() {
     { href: "/quickstart", label: "Quickstart" },
     { href: "/faq", label: "FAQ" },
     { href: "/docs", label: "Documentation" },
-    { href: "/#pricing", label: "Pricing" },
+    { href: "/pricing", label: "Pricing" },
     { href: "/security", label: "Security" },
   ];
 

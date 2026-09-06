@@ -1176,7 +1176,7 @@ export interface BillingStatus {
   hasStripeCustomer: boolean;
   hasSubscription: boolean;
   currentDbCount: number;
-  maxDatabases: number;
+  maxDatabases: number | null;
 }
 
 export async function getBillingStatus(token?: string): Promise<BillingStatus> {

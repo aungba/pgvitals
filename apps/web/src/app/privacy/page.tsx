@@ -13,16 +13,16 @@ export default function PrivacyPage() {
 
       <PublicNav />
 
-      <main className="landing-container" style={{ padding: "120px 24px 80px", maxWidth: 960 }}>
+      <main className="landing-container" style={{ padding: "44px 24px 72px", maxWidth: 960 }}>
         {/* Header */}
-        <div style={{ marginBottom: 40, textAlign: "center" }}>
-          <div className="landing-hero-badge" style={{ margin: "0 auto 12px" }}>
+        <div style={{ marginBottom: 28, textAlign: "center" }}>
+          <div className="landing-hero-badge" style={{ margin: "0 auto 10px" }}>
             <span>Legal & Privacy</span>
           </div>
-          <h1 style={{ fontSize: "2.8rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 12 }}>
+          <h1 style={{ fontSize: "2.5rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 10 }}>
             Privacy Policy
           </h1>
-          <p style={{ color: "var(--text-secondary)", fontSize: "1.05rem" }}>
+          <p style={{ color: "var(--text-secondary)", fontSize: "1rem", margin: 0 }}>
             Effective Date: August 31, 2026 · Version 2.0
           </p>
         </div>

@@ -54,7 +54,8 @@ function SidebarPlanBadge({ collapsed }: { collapsed: boolean }) {
 
   const isTrial = status.isTrialActive;
   const planLabel = isTrial ? "Pro Trial" : status.planTier === "free" ? "Free Forever" : `${status.planTier.toUpperCase()} Plan`;
-  const capacityLabel = status.maxDatabases === Infinity ? `${status.currentDbCount} DBs` : `${status.currentDbCount} / ${status.maxDatabases} DBs`;
+  const isUnlimited = status.maxDatabases === null || status.maxDatabases === undefined || status.maxDatabases === Infinity || status.planTier === "team";
+  const capacityLabel = isUnlimited ? `${status.currentDbCount} / Unlimited DBs` : `${status.currentDbCount} / ${status.maxDatabases} DBs`;
 
   return (
     <Link

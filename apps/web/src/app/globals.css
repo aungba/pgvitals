@@ -3464,15 +3464,15 @@ h4 { font-size: 1.1rem; }
    =================================================================== */
 
 .docs-wrapper {
-  padding: 100px var(--space-lg) 80px;
+  padding: 44px var(--space-lg) 72px;
   max-width: 1280px;
   margin: 0 auto;
 }
 
 .docs-header-hero {
-  margin-bottom: 40px;
+  margin-bottom: 28px;
   border-bottom: 1px solid var(--border);
-  padding-bottom: 28px;
+  padding-bottom: 22px;
 }
 
 .docs-header-hero h1 {

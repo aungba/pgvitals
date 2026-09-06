@@ -13,15 +13,15 @@ export default function SecurityPage() {
 
       <PublicNav />
 
-      <main className="landing-container" style={{ padding: "120px 24px 80px", maxWidth: 960 }}>
-        <div style={{ textAlign: "center", marginBottom: 48 }}>
-          <div className="landing-hero-badge" style={{ margin: "0 auto 12px" }}>
+      <main className="landing-container" style={{ padding: "44px 24px 72px", maxWidth: 960 }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div className="landing-hero-badge" style={{ margin: "0 auto 10px" }}>
             <span>🛡️ Enterprise Security</span>
           </div>
-          <h1 style={{ fontSize: "2.8rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 16 }}>
+          <h1 style={{ fontSize: "2.5rem", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 12 }}>
             Security & Data Protection
           </h1>
-          <p style={{ color: "var(--text-secondary)", fontSize: "1.15rem", maxWidth: 640, margin: "0 auto" }}>
+          <p style={{ color: "var(--text-secondary)", fontSize: "1.05rem", maxWidth: 640, margin: "0 auto" }}>
             Learn how PG Vitals protects your database credentials, isolates organizations, and guarantees zero customer row access.
           </p>
         </div>

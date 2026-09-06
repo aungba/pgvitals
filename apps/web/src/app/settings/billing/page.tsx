@@ -234,7 +234,9 @@ export default function BillingPage() {
               <div style={{ textAlign: "right" }}>
                 <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>Database Capacity</span>
                 <div style={{ fontWeight: 600, fontSize: 15, marginTop: 2 }}>
-                  {status.currentDbCount} / {status.maxDatabases === Infinity ? "Unlimited" : `${status.maxDatabases} DBs`}
+                  {status.maxDatabases === null || status.maxDatabases === undefined || status.maxDatabases === Infinity || currentTier === "team"
+                    ? `${status.currentDbCount} / Unlimited DBs`
+                    : `${status.currentDbCount} / ${status.maxDatabases} DBs`}
                 </div>
               </div>
             )}
@@ -259,14 +261,17 @@ export default function BillingPage() {
           const isUpgrade =
             (currentTier === "free" && (plan.tier === "pro" || plan.tier === "team")) ||
             (currentTier === "pro" && plan.tier === "team");
+          const isDowngrade =
+            (currentTier === "team" && (plan.tier === "pro" || plan.tier === "free")) ||
+            (currentTier === "pro" && plan.tier === "free");
 
           return (
             <div
               key={plan.tier}
               className={`glass-card billing-plan-card ${isCurrent ? "billing-plan-current" : ""}`}
-              style={plan.tier === "pro" ? { borderColor: "var(--brand)", position: "relative" } : {}}
+              style={plan.tier === "pro" && !isCurrent && !isDowngrade ? { borderColor: "var(--brand)", position: "relative" } : { position: "relative" }}
             >
-              {plan.tier === "pro" && (
+              {plan.tier === "pro" && !isCurrent && !isDowngrade && (
                 <div
                   style={{
                     position: "absolute",
@@ -314,20 +319,48 @@ export default function BillingPage() {
 
               <div className="billing-plan-action">
                 {isCurrent ? (
-                  <button className="btn-secondary" disabled>
+                  <button className="btn-secondary" disabled style={{ width: "100%", opacity: 0.85, cursor: "default" }}>
                     Current Plan
                   </button>
-                ) : (
+                ) : isUpgrade ? (
                   <button
-                    className={plan.tier === "pro" ? "btn-primary" : "btn-secondary"}
+                    className="btn-primary"
+                    style={{ width: "100%" }}
                     onClick={() => handleUpgrade(plan.tier as "pro" | "team")}
+                    disabled={actionLoading}
+                  >
+                    {actionLoading
+                      ? "Redirecting..."
+                      : `Upgrade to ${plan.name}`}
+                  </button>
+                ) : isDowngrade ? (
+                  <button
+                    className="btn-secondary"
+                    style={{ width: "100%" }}
+                    onClick={() => {
+                      if (status?.hasSubscription) {
+                        handleManageBilling();
+                      } else {
+                        handleUpgrade(plan.tier as "pro" | "team");
+                      }
+                    }}
                     disabled={actionLoading || plan.tier === "free"}
                   >
                     {actionLoading
                       ? "Redirecting..."
                       : plan.tier === "free"
                         ? "Included by Default"
-                        : `Get ${plan.name}`}
+                        : status?.hasSubscription
+                          ? "Downgrade in Portal"
+                          : `Switch to ${plan.name}`}
+                  </button>
+                ) : (
+                  <button
+                    className="btn-secondary"
+                    style={{ width: "100%" }}
+                    disabled
+                  >
+                    Included by Default
                   </button>
                 )}
               </div>
