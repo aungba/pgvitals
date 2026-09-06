@@ -48,7 +48,7 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
           : org?.planTier === "pro"
             ? 5
             : org?.planTier === "team"
-              ? null // null represents unlimited database capacity in JSON
+              ? 15
               : 1;
 
         return reply.send({
@@ -115,7 +115,7 @@ export default async function billingRoutes(app: FastifyInstance): Promise<void>
             .where(eq(organizations.id, orgId));
         }
 
-        // Tier package pricing: Base Pro includes up to 5 databases, Team includes unlimited
+        // Tier package pricing: Base Pro includes up to 5 databases, Team includes up to 15
         const session = await stripe.checkout.sessions.create({
           customer: customerId,
           mode: "subscription",

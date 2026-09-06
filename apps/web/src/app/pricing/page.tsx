@@ -66,11 +66,11 @@ export default function PricingPage() {
       name: "Team",
       badge: "Scale & Enterprise",
       price: isAnnual ? "$79" : "$99",
-      period: isAnnual ? "/mo ($948 billed annually)" : "/month (unlimited databases)",
+      period: isAnnual ? "/mo ($948 billed annually)" : "/month (up to 15 databases)",
       description: "For scaling engineering organizations and multi-dev teams managing multiple database clusters.",
       highlight: false,
       features: [
-        "Unlimited databases monitored",
+        "Up to 15 databases monitored",
         "Everything in Pro included",
         "Unlimited team members & RBAC",
         "90-day continuous metric rollups",
@@ -86,7 +86,7 @@ export default function PricingPage() {
   ];
 
   const comparisonFeatures = [
-    { name: "Monitored Databases", free: "1 DB", pro: "Up to 5 DBs", team: "Unlimited DBs" },
+    { name: "Monitored Databases", free: "1 DB", pro: "Up to 5 DBs", team: "Up to 15 DBs" },
     { name: "Metric Retention", free: "24 Hours", pro: "30 Days", team: "90 Days" },
     { name: "Live Connection Gauge & Sessions", free: "✓", pro: "✓", team: "✓" },
     { name: "PostgreSQL Config Advisor (PGTune)", free: "✓", pro: "✓", team: "✓" },
@@ -109,6 +109,10 @@ export default function PricingPage() {
     {
       q: "Can I upgrade or downgrade anytime?",
       a: "Yes. Upgrades and downgrades take effect immediately. If you upgrade, charges are prorated for the remaining billing cycle. Downgrades take effect at the end of the current billing period via your Stripe billing portal.",
+    },
+    {
+      q: "What if I need to monitor more than 15 databases?",
+      a: "For engineering teams with large database fleets (>15 DBs), custom Enterprise plans are available with volume pricing, dedicated collector instances, extended metric retention, and custom SLAs.",
     },
     {
       q: "Are monitored databases limited by queries per second?",

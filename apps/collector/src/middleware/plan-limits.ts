@@ -39,7 +39,7 @@ const PLAN_LIMITS: Record<string, PlanLimits> = {
     retentionDays: 30,
   },
   team: {
-    maxDatabases: Infinity,
+    maxDatabases: 15,
     alertingEnabled: true,
     queryPerformanceEnabled: true,
     indexAdvisorEnabled: true,
@@ -80,8 +80,17 @@ export async function checkDatabaseLimit(
 
   if (existing.length >= limits.maxDatabases) {
     const planLabel = isTrialActive ? "Free Trial" : `${planTier.charAt(0).toUpperCase() + planTier.slice(1)} plan`;
+    let upgradeMsg = "";
+    if (planTier === "free" || isTrialActive) {
+      upgradeMsg = " Upgrade to Pro to monitor up to 5 databases, or Team for up to 15 databases.";
+    } else if (planTier === "pro") {
+      upgradeMsg = " Upgrade to Team to monitor up to 15 databases.";
+    } else {
+      upgradeMsg = " Contact support for Enterprise fleet limits.";
+    }
+
     return reply.status(403).send({
-      error: `Your ${planLabel} allows up to ${limits.maxDatabases} database(s). Upgrade to Pro to monitor up to 5 databases.`,
+      error: `Your ${planLabel} allows up to ${limits.maxDatabases} database(s).${upgradeMsg}`,
       code: "PLAN_LIMIT_EXCEEDED",
       currentCount: existing.length,
       limit: limits.maxDatabases,

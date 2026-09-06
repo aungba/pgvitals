@@ -54,10 +54,10 @@ const PLANS = [
     tier: "team" as const,
     name: "Team",
     price: "$99",
-    period: "/mo (unlimited databases)",
+    period: "/mo (up to 15 databases)",
     description: "For scaling engineering organizations and multi-dev teams",
     features: [
-      "Unlimited databases monitored",
+      "Up to 15 databases monitored",
       "Everything in Pro",
       "Unlimited team members & RBAC",
       "90-day continuous metric rollups",
@@ -234,7 +234,7 @@ export default function BillingPage() {
               <div style={{ textAlign: "right" }}>
                 <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>Database Capacity</span>
                 <div style={{ fontWeight: 600, fontSize: 15, marginTop: 2 }}>
-                  {status.maxDatabases === null || status.maxDatabases === undefined || status.maxDatabases === Infinity || currentTier === "team"
+                  {status.maxDatabases === null || status.maxDatabases === undefined || status.maxDatabases === Infinity
                     ? `${status.currentDbCount} / Unlimited DBs`
                     : `${status.currentDbCount} / ${status.maxDatabases} DBs`}
                 </div>

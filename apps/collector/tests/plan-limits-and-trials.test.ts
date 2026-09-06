@@ -78,9 +78,9 @@ describe("Trial & Plan Limits Architecture", () => {
       expect(limits.retentionDays).toBe(30);
     });
 
-    it("enforces Unlimited DBs and 90-day retention on Team tier ($99/mo)", () => {
+    it("enforces 15 DB limit and 90-day retention on Team tier ($99/mo)", () => {
       const limits = getLimits("team", false);
-      expect(limits.maxDatabases).toBe(Infinity);
+      expect(limits.maxDatabases).toBe(15);
       expect(limits.alertingEnabled).toBe(true);
       expect(limits.retentionDays).toBe(90);
     });
