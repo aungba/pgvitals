@@ -31,12 +31,13 @@ export interface ConnectionChartProps {
   snapshots: Snapshot[];
   schemaEvents?: SchemaEventMarker[];
   selectedTimestamp?: string | null;
-  onSelectTimestamp?: (timestamp: string | null) => void;
+  onSelectTimestamp?: (timestamp: string | null, snapshotId?: string | null) => void;
   timeframe?: Timeframe;
   onTimeframeChange?: (tf: Timeframe) => void;
 }
 
 interface ChartDataPoint {
+  snapshotId?: string;
   time: string;
   timestamp: number;
   rawTimestamp: string;
@@ -155,6 +156,7 @@ export default function ConnectionChart({
     .slice()
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
     .map((s) => ({
+      snapshotId: s.id,
       time: formatTime(s.timestamp, activeTimeframe),
       timestamp: new Date(s.timestamp).getTime(),
       rawTimestamp: s.timestamp,
@@ -298,7 +300,7 @@ export default function ConnectionChart({
               if (e && e.activePayload && e.activePayload[0]) {
                 const pt = e.activePayload[0].payload as ChartDataPoint;
                 if (pt?.rawTimestamp) {
-                  onSelectTimestamp?.(pt.rawTimestamp);
+                  onSelectTimestamp?.(pt.rawTimestamp, pt.snapshotId);
                 }
               }
             }}

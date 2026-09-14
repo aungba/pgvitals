@@ -158,20 +158,23 @@ export default function DatabaseDetailPage() {
   }, [isPaused, selectedHistoricalTimestamp, fetchAll]);
 
   // Handle Point-in-Time Snapshot Selection
-  const handleSelectSnapshot = useCallback(async (ts: string | null) => {
-    if (!ts) {
+  const handleSelectSnapshot = useCallback(async (ts: string | null, snapshotId?: string | null) => {
+    if (!ts && !snapshotId) {
       setSelectedHistoricalTimestamp(null);
       setReplaySnapshotTimestamp(null);
       fetchAll();
       return;
     }
 
-    setSelectedHistoricalTimestamp(ts);
+    if (ts) setSelectedHistoricalTimestamp(ts);
     setReplayLoading(true);
     try {
-      const res = await getSessions(id, ts);
+      const res = await getSessions(id, ts || undefined, undefined, snapshotId || undefined);
       setSessions(res.sessions);
       setReplaySnapshotTimestamp(res.snapshotTimestamp ?? ts);
+      if (!ts && res.snapshotTimestamp) {
+        setSelectedHistoricalTimestamp(res.snapshotTimestamp);
+      }
     } catch {
       // ignore
     } finally {
@@ -185,7 +188,19 @@ export default function DatabaseDetailPage() {
     const targetMs = new Date(selectedHistoricalTimestamp).getTime();
     // Sort snapshots chronologically
     const sorted = [...snapshots].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-    return sorted.findIndex((s) => Math.abs(new Date(s.timestamp).getTime() - targetMs) < 5000);
+    const exact = sorted.findIndex((s) => Math.abs(new Date(s.timestamp).getTime() - targetMs) < 10000);
+    if (exact !== -1) return exact;
+
+    let closestIdx = 0;
+    let minDelta = Infinity;
+    sorted.forEach((s, idx) => {
+      const delta = Math.abs(new Date(s.timestamp).getTime() - targetMs);
+      if (delta < minDelta) {
+        minDelta = delta;
+        closestIdx = idx;
+      }
+    });
+    return closestIdx;
   }, [selectedHistoricalTimestamp, snapshots]);
 
   const sortedChronologicalSnapshots = useMemo(() => {
@@ -199,10 +214,12 @@ export default function DatabaseDetailPage() {
       newIndex = sortedChronologicalSnapshots.length - 1;
     }
     if (direction === "prev" && newIndex > 0) {
-      handleSelectSnapshot(sortedChronologicalSnapshots[newIndex - 1].timestamp);
+      const snap = sortedChronologicalSnapshots[newIndex - 1];
+      handleSelectSnapshot(snap.timestamp, snap.id);
     } else if (direction === "next") {
       if (newIndex < sortedChronologicalSnapshots.length - 1) {
-        handleSelectSnapshot(sortedChronologicalSnapshots[newIndex + 1].timestamp);
+        const snap = sortedChronologicalSnapshots[newIndex + 1];
+        handleSelectSnapshot(snap.timestamp, snap.id);
       } else {
         handleSelectSnapshot(null); // Return to live
       }

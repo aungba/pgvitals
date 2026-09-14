@@ -219,15 +219,30 @@ export async function getSessions(
   id: string,
   timestampOrSnapshotId?: string,
   token?: string,
+  snapshotId?: string,
 ): Promise<{ snapshotId: string | null; snapshotTimestamp: string | null; sessions: Session[] }> {
   let url = `/api/databases/${id}/sessions`;
-  if (timestampOrSnapshotId) {
-    if (timestampOrSnapshotId.includes("-") && timestampOrSnapshotId.length === 36 && !timestampOrSnapshotId.includes("T")) {
-      url += `?snapshotId=${encodeURIComponent(timestampOrSnapshotId)}`;
+  const params = new URLSearchParams();
+
+  if (snapshotId) {
+    params.set("snapshotId", snapshotId);
+    if (timestampOrSnapshotId && timestampOrSnapshotId !== snapshotId) {
+      params.set("timestamp", timestampOrSnapshotId);
+    }
+  } else if (timestampOrSnapshotId) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(timestampOrSnapshotId);
+    if (isUuid) {
+      params.set("snapshotId", timestampOrSnapshotId);
     } else {
-      url += `?timestamp=${encodeURIComponent(timestampOrSnapshotId)}`;
+      params.set("timestamp", timestampOrSnapshotId);
     }
   }
+
+  const qs = params.toString();
+  if (qs) {
+    url += `?${qs}`;
+  }
+
   const data = await request<SessionsResponse>(url, { token });
   return {
     snapshotId: data.snapshotId ?? null,

@@ -181,17 +181,49 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
             .where(and(eq(snapshots.monitoredDbId, id), eq(snapshots.id, requestedSnapshotId)))
             .limit(1);
           targetSnapshot = found;
-        } else if (requestedTimestamp) {
+        }
+
+        // If no snapshot found by ID and a timestamp was requested, or if only timestamp was requested
+        if (!targetSnapshot && requestedTimestamp) {
           const targetDate = new Date(requestedTimestamp);
-          const [found] = await db
+          const windowMs = 15 * 60 * 1000;
+          const minDate = new Date(targetDate.getTime() - windowMs);
+          const maxDate = new Date(targetDate.getTime() + windowMs);
+
+          // 1. Search nearest snapshot within a ±15 minute window using index
+          const [nearestInWindow] = await db
             .select({ id: snapshots.id, timestamp: snapshots.timestamp })
             .from(snapshots)
-            .where(and(eq(snapshots.monitoredDbId, id), lte(snapshots.timestamp, targetDate)))
-            .orderBy(desc(snapshots.timestamp))
+            .where(
+              and(
+                eq(snapshots.monitoredDbId, id),
+                gte(snapshots.timestamp, minDate),
+                lte(snapshots.timestamp, maxDate)
+              )
+            )
+            .orderBy(
+              sql`CASE WHEN ${snapshots.timestamp} >= ${targetDate}::timestamptz THEN 0 ELSE 1 END ASC`,
+              sql`ABS(EXTRACT(EPOCH FROM (${snapshots.timestamp} - ${targetDate}::timestamptz))) ASC`
+            )
             .limit(1);
-          targetSnapshot = found;
-        } else {
-          // Get the latest snapshot for this database
+
+          targetSnapshot = nearestInWindow;
+
+          // 2. Fallback to closest snapshot across all time for this DB
+          if (!targetSnapshot) {
+            const [nearestGlobal] = await db
+              .select({ id: snapshots.id, timestamp: snapshots.timestamp })
+              .from(snapshots)
+              .where(eq(snapshots.monitoredDbId, id))
+              .orderBy(
+                sql`CASE WHEN ${snapshots.timestamp} >= ${targetDate}::timestamptz THEN 0 ELSE 1 END ASC`,
+                sql`ABS(EXTRACT(EPOCH FROM (${snapshots.timestamp} - ${targetDate}::timestamptz))) ASC`
+              )
+              .limit(1);
+            targetSnapshot = nearestGlobal;
+          }
+        } else if (!targetSnapshot && !requestedSnapshotId && !requestedTimestamp) {
+          // Live mode: Get the latest snapshot for this database
           const [latestSnapshot] = await db
             .select({ id: snapshots.id, timestamp: snapshots.timestamp })
             .from(snapshots)
@@ -206,11 +238,59 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
         }
 
         // Fetch sessions for this snapshot
-        const sessions = await db
+        let sessions = await db
           .select()
           .from(sessionsSnapshot)
-          .where(eq(sessionsSnapshot.snapshotId, targetSnapshot.id))
+          .where(
+            and(
+              eq(sessionsSnapshot.monitoredDbId, id),
+              eq(sessionsSnapshot.snapshotId, targetSnapshot.id)
+            )
+          )
           .orderBy(desc(sessionsSnapshot.stateDurationSeconds));
+
+        // If targetSnapshot has 0 sessions recorded, check if there's a nearby snapshot within ±15 minutes that does
+        if (sessions.length === 0) {
+          const refDate = targetSnapshot.timestamp;
+          const [nearbyWithSessions] = await db
+            .select({
+              snapshotId: sessionsSnapshot.snapshotId,
+              timestamp: sessionsSnapshot.timestamp,
+            })
+            .from(sessionsSnapshot)
+            .where(
+              and(
+                eq(sessionsSnapshot.monitoredDbId, id),
+                gte(sessionsSnapshot.timestamp, new Date(refDate.getTime() - 15 * 60 * 1000)),
+                lte(sessionsSnapshot.timestamp, new Date(refDate.getTime() + 15 * 60 * 1000))
+              )
+            )
+            .orderBy(
+              sql`ABS(EXTRACT(EPOCH FROM (${sessionsSnapshot.timestamp} - ${refDate}::timestamptz))) ASC`
+            )
+            .limit(1);
+
+          if (nearbyWithSessions && nearbyWithSessions.snapshotId !== targetSnapshot.id) {
+            const fallbackSessions = await db
+              .select()
+              .from(sessionsSnapshot)
+              .where(
+                and(
+                  eq(sessionsSnapshot.monitoredDbId, id),
+                  eq(sessionsSnapshot.snapshotId, nearbyWithSessions.snapshotId)
+                )
+              )
+              .orderBy(desc(sessionsSnapshot.stateDurationSeconds));
+
+            if (fallbackSessions.length > 0) {
+              sessions = fallbackSessions;
+              targetSnapshot = {
+                id: nearbyWithSessions.snapshotId,
+                timestamp: nearbyWithSessions.timestamp,
+              };
+            }
+          }
+        }
 
         return reply.send({
           snapshotId: targetSnapshot.id,
