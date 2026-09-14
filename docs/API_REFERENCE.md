@@ -45,7 +45,7 @@ PG Vitals exposes a fully documented REST and Server-Sent Events (SSE) API built
 | `GET` | `/api/databases/:id/overview` | Fetch latest connection metrics, active session counts, and health score |
 | `GET` | `/api/databases/:id/live-sessions` | **SSE Stream**: Server-Sent Events real-time stream of active queries and lock waits |
 | `GET` | `/api/databases/:id/rollups` | Retrieve pre-aggregated `5m`, `1h`, or `1d` historical metrics |
-| `GET` | `/api/databases/:id/snapshots` | Retrieve raw historical connection snapshots |
+| `GET` | `/api/databases/:id/snapshots` | Retrieve historical connection snapshots (`?from=&to=&limit=&timeframe=`) with automatic `date_bin` bucketing for multi-hour ranges (`6h`, `24h`, `7d`, `all`) |
 
 ---
 

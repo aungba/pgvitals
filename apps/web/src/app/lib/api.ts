@@ -242,11 +242,13 @@ export async function getSnapshots(
   from?: string,
   to?: string,
   token?: string,
+  timeframe?: string,
 ): Promise<Snapshot[]> {
   const params = new URLSearchParams();
-  params.set("limit", limit.toString());
+  if (limit) params.set("limit", limit.toString());
   if (from) params.set("from", from);
   if (to) params.set("to", to);
+  if (timeframe) params.set("timeframe", timeframe);
   const data = await request<SnapshotsResponse>(
     `/api/databases/${id}/snapshots?${params.toString()}`,
     { token },

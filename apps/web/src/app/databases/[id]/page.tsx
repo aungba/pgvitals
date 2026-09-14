@@ -22,7 +22,7 @@ import type {
   SchemaEvent,
 } from "../../lib/api";
 import ConnectionGauge from "../../components/ConnectionGauge";
-import ConnectionChart from "../../components/ConnectionChart";
+import ConnectionChart, { Timeframe } from "../../components/ConnectionChart";
 import SessionsTable from "../../components/SessionsTable";
 import HintCard from "../../components/HintCard";
 import StatsCard from "../../components/StatsCard";
@@ -77,7 +77,18 @@ export default function DatabaseDetailPage() {
   const [selectedHistoricalTimestamp, setSelectedHistoricalTimestamp] = useState<string | null>(null);
   const [replaySnapshotTimestamp, setReplaySnapshotTimestamp] = useState<string | null>(null);
   const [replayLoading, setReplayLoading] = useState(false);
+  const [timeframe, setTimeframe] = useState<Timeframe>("1h");
   const [copiedBlockerPid, setCopiedBlockerPid] = useState<number | null>(null);
+
+  const handleTimeframeChange = useCallback(async (newTf: Timeframe) => {
+    setTimeframe(newTf);
+    try {
+      const snaps = await getSnapshots(id, 500, undefined, undefined, undefined, newTf);
+      setSnapshots(snaps);
+    } catch {
+      // ignore
+    }
+  }, [id]);
 
   const handleDelete = useCallback(async () => {
     if (!database) return;
@@ -102,7 +113,7 @@ export default function DatabaseDetailPage() {
         getDatabase(id),
         getOverview(id),
         getSessions(id),
-        getSnapshots(id, 200),
+        getSnapshots(id, 500, undefined, undefined, undefined, timeframe),
         getHints(id),
         getActiveAlerts(id),
         getSchemaEvents(id).catch(() => ({ events: [] as SchemaEvent[] })),
@@ -123,7 +134,7 @@ export default function DatabaseDetailPage() {
       setLoading(false);
       setCountdown(10);
     }
-  }, [id, selectedHistoricalTimestamp]);
+  }, [id, selectedHistoricalTimestamp, timeframe]);
 
   useEffect(() => {
     fetchAll();
@@ -686,6 +697,8 @@ export default function DatabaseDetailPage() {
             schemaEvents={schemaEvents}
             selectedTimestamp={selectedHistoricalTimestamp}
             onSelectTimestamp={handleSelectSnapshot}
+            timeframe={timeframe}
+            onTimeframeChange={handleTimeframeChange}
           />
         </ErrorBoundary>
       </div>

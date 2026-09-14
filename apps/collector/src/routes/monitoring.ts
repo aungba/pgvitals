@@ -8,7 +8,7 @@ import {
   dbHealthSnapshots,
   metricRollups,
 } from "@pgvitals/db";
-import { eq, desc, and, gte, lte } from "drizzle-orm";
+import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 import { sessionBroadcaster } from "../lib/session-broadcaster.js";
 
@@ -238,35 +238,139 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
 
   /**
    * GET /api/databases/:id/snapshots — Time-series snapshots.
-   * Query params: from (ISO), to (ISO), limit (default 100).
+   * Query params: from (ISO), to (ISO), limit (default 200), timeframe ('15m' | '1h' | '6h' | '24h' | '7d' | 'all').
    */
   app.get<{
     Params: { id: string };
-    Querystring: { from?: string; to?: string; limit?: string };
+    Querystring: { from?: string; to?: string; limit?: string; timeframe?: string };
   }>(
     "/api/databases/:id/snapshots",
     { preHandler: [authMiddleware] },
     async (request, reply) => {
       try {
         const { id } = request.params;
-        const { from, to, limit: limitStr } = request.query;
-        const limit = Math.min(parseInt(limitStr ?? "100", 10), 1000);
+        const { from, to, limit: limitStr, timeframe } = request.query;
 
         // Verify database belongs to this org
         if (!await verifyDbOwnership(id, request.auth.orgId)) {
           return reply.status(404).send({ error: "Database not found" });
         }
 
-        const conditions = [eq(snapshots.monitoredDbId, id)];
+        const now = new Date();
+        let startDate: Date | undefined;
+        let endDate: Date | undefined = to ? new Date(to) : now;
 
         if (from) {
-          conditions.push(gte(snapshots.timestamp, new Date(from)));
-        }
-        if (to) {
-          conditions.push(lte(snapshots.timestamp, new Date(to)));
+          startDate = new Date(from);
+        } else if (timeframe) {
+          switch (timeframe.toLowerCase()) {
+            case "15m":
+              startDate = new Date(now.getTime() - 15 * 60 * 1000);
+              break;
+            case "1h":
+              startDate = new Date(now.getTime() - 60 * 60 * 1000);
+              break;
+            case "6h":
+              startDate = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+              break;
+            case "24h":
+              startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+              break;
+            case "7d":
+              startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+              break;
+            case "all":
+              startDate = undefined;
+              break;
+          }
         }
 
-        const result = await db
+        const durationMs = startDate ? endDate.getTime() - startDate.getTime() : Infinity;
+        const isMultiHour = durationMs > 60 * 60 * 1000 || timeframe === "all";
+
+        // For longer time ranges (> 1 hour or 'all'), bucket snapshots to prevent browser lag and cover the full range
+        if (isMultiHour) {
+          let intervalStr = "1 minute"; // 6h -> ~360 buckets
+          if (durationMs > 7 * 24 * 60 * 60 * 1000 || timeframe === "all") {
+            intervalStr = "2 hours";
+          } else if (durationMs > 24 * 60 * 60 * 1000) {
+            intervalStr = "30 minutes"; // 7d -> ~336 buckets
+          } else if (durationMs > 6 * 60 * 60 * 1000) {
+            intervalStr = "5 minutes"; // 24h -> ~288 buckets
+          }
+
+          try {
+            const bucketQuery = sql`
+              SELECT
+                min(${snapshots.id})::text AS id,
+                date_bin(${sql.raw(`INTERVAL '${intervalStr}'`)}, ${snapshots.timestamp}, TIMESTAMPTZ '2000-01-01 00:00:00Z') AS timestamp,
+                ROUND(AVG(${snapshots.connectionCount}))::int AS "connectionCount",
+                ROUND(AVG(${snapshots.activeCount}))::int AS "activeCount",
+                ROUND(AVG(${snapshots.idleCount}))::int AS "idleCount",
+                ROUND(AVG(${snapshots.idleInTxnCount}))::int AS "idleInTxnCount",
+                ROUND(AVG(${snapshots.idleInTxnAbortedCount}))::int AS "idleInTxnAbortedCount",
+                MAX(${snapshots.maxConnections})::int AS "maxConnections"
+              FROM ${snapshots}
+              WHERE ${snapshots.monitoredDbId} = ${id}
+                ${startDate ? sql`AND ${snapshots.timestamp} >= ${startDate}` : sql``}
+                ${endDate ? sql`AND ${snapshots.timestamp} <= ${endDate}` : sql``}
+              GROUP BY date_bin(${sql.raw(`INTERVAL '${intervalStr}'`)}, ${snapshots.timestamp}, TIMESTAMPTZ '2000-01-01 00:00:00Z')
+              ORDER BY timestamp DESC
+              LIMIT 600
+            `;
+
+            const bucketRows = await db.execute<{
+              id: string;
+              timestamp: string | Date;
+              connectionCount: number;
+              activeCount: number;
+              idleCount: number;
+              idleInTxnCount: number;
+              idleInTxnAbortedCount: number;
+              maxConnections: number;
+            }>(bucketQuery);
+
+            const bucketList = (bucketRows as unknown as Array<{
+              id: string;
+              timestamp: string | Date;
+              connectionCount: number;
+              activeCount: number;
+              idleCount: number;
+              idleInTxnCount: number;
+              idleInTxnAbortedCount: number;
+              maxConnections: number;
+            }>) ?? [];
+
+            if (bucketList.length > 0) {
+              const formatted = bucketList.map((r) => ({
+                id: String(r.id),
+                timestamp: new Date(r.timestamp).toISOString(),
+                connectionCount: Number(r.connectionCount ?? 0),
+                activeCount: Number(r.activeCount ?? 0),
+                idleCount: Number(r.idleCount ?? 0),
+                idleInTxnCount: Number(r.idleInTxnCount ?? 0),
+                idleInTxnAbortedCount: Number(r.idleInTxnAbortedCount ?? 0),
+                maxConnections: Number(r.maxConnections ?? 100),
+              }));
+              return reply.send({ snapshots: formatted });
+            }
+          } catch (bucketErr) {
+            request.log.warn({ bucketErr }, "Date bin aggregation failed, falling back to raw snapshot query");
+          }
+        }
+
+        // Standard raw snapshot query (used for <= 1 hour or as fallback)
+        const limit = Math.min(parseInt(limitStr ?? (timeframe ? "500" : "200"), 10), 1000);
+        const conditions = [eq(snapshots.monitoredDbId, id)];
+
+        if (startDate) {
+          conditions.push(gte(snapshots.timestamp, startDate));
+        }
+        if (endDate) {
+          conditions.push(lte(snapshots.timestamp, endDate));
+        }
+
+        const rawResult = await db
           .select({
             id: snapshots.id,
             timestamp: snapshots.timestamp,
@@ -282,7 +386,14 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
           .orderBy(desc(snapshots.timestamp))
           .limit(limit);
 
-        return reply.send({ snapshots: result });
+        // If fallback query returned more than 400 snapshots, downsample evenly
+        if (rawResult.length > 400) {
+          const step = Math.ceil(rawResult.length / 300);
+          const sampled = rawResult.filter((_, idx) => idx % step === 0);
+          return reply.send({ snapshots: sampled });
+        }
+
+        return reply.send({ snapshots: rawResult });
       } catch (err) {
         request.log.error({ err }, "Failed to get snapshots");
         return reply.status(500).send({ error: "Failed to get snapshots" });

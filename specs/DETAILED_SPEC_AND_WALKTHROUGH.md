@@ -1,7 +1,7 @@
 # PG Vitals — Detailed Technical Specification & Codebase Walkthrough
 
 > **Version:** 0.9.0 | **Last Updated:** 2026-08-25  
-> **Status:** All product phases 1–12 and Performance Bottleneck Remediations implemented: In-Memory Pub/Sub `SessionBroadcaster` ($O(1)$ database query overhead for multi-client SSE live streaming), elimination of duplicate `snapshots.rawPayload` JSON bloat, 250-row chunked bulk session inserts, single-query `verifyDbOwnership` resolution, React Query with custom hooks, Skeleton loading states, and Error Boundaries. Test suite contains 129 tests across 15 test files.
+> **Status:** All product phases 1–12, Performance Bottleneck Remediations, and Server-Side Connection History Timeframe Aggregation (15m, 1h, 6h, 24h, 7d, all with PostgreSQL `date_bin` bucketing) implemented: In-Memory Pub/Sub `SessionBroadcaster` ($O(1)$ database query overhead for multi-client SSE live streaming), elimination of duplicate `snapshots.rawPayload` JSON bloat, 250-row chunked bulk session inserts, single-query `verifyDbOwnership` resolution, React Query with custom hooks, Skeleton loading states, and Error Boundaries. Test suite contains 168 tests across 20 test files.
 
 ---
 
@@ -853,7 +853,7 @@ Detects DDL changes (CREATE/DROP table/column/index) via periodic schema diffing
 |-----------|---------|
 | `Sidebar` | Collapsible navigation sidebar — client component with localStorage-persisted collapse state |
 | `ConnectionGauge` | SVG radial gauge showing connection utilization % with stacked pool composition bar, active/idle/idle-in-txn breakdown, and headroom capacity metrics |
-| `ConnectionChart` | Recharts time-series area chart for connection counts + schema change markers (ReferenceLine) |
+| `ConnectionChart` | Recharts time-series area chart for connection counts + schema change markers (ReferenceLine) with controlled timeframe controls (15m, 1h, 6h, 24h, 7d, ALL), multi-day date/time formatting, and available history span badge |
 | `SessionsTable` | Sortable, filterable table of active PostgreSQL sessions with sticky column headers |
 | `SessionGroups` | Sessions grouped by application_name, usename, or state |
 | `PlanDiffVisualizer` | Dual-column side-by-side execution plan diff view with node difference highlights and delta metrics |
@@ -908,7 +908,7 @@ Type-safe fetch wrapper with:
 
 Standardized `@tanstack/react-query` hooks with window-focus revalidation, automatic cache deduplication, and streaming fallback:
 - `useOverview(dbId, token)`: Overview metrics and connection gauge data (cached with 10s refetch interval).
-- `useSnapshots(dbId, limit, from, to, token)`: Time-series connection history snapshots.
+- `useSnapshots(dbId, limit, from, to, token, timeframe)`: Time-series connection history snapshots with optional server-side timeframe filtering.
 - `useRollups(dbId, resolution, hours, token)`: Pre-aggregated 5m/1h/1d continuous rollups.
 - `useQueriesList(dbId, sort, limit, token)`: Query performance metrics with tail latencies.
 - `useLiveSessions(dbId, token)`: Subscribes directly to Server-Sent Events with automatic fallback to polling if disconnected.
@@ -944,7 +944,7 @@ Standardized `@tanstack/react-query` hooks with window-focus revalidation, autom
 | `GET` | `/api/databases/:id/sessions` | Latest or historical session details (`?timestamp=` or `?snapshotId=`) |
 | `GET` | `/api/databases/:id/live-sessions` | Real-time Server-Sent Events (SSE) stream for live active sessions & locks |
 | `GET` | `/api/databases/:id/rollups` | Pre-aggregated metric rollups (`?resolution=5m\|1h\|1d&hours=24`) |
-| `GET` | `/api/databases/:id/snapshots` | Time-series snapshots (`?from=&to=&limit=`) |
+| `GET` | `/api/databases/:id/snapshots` | Time-series snapshots (`?from=&to=&limit=&timeframe=`) with automatic PostgreSQL `date_bin` bucketing for multi-hour ranges (`6h`, `24h`, `7d`, `all`) |
 | `GET` | `/api/databases/:id/hints` | Active or historical root-cause hints (`?hours=&severity=&ruleType=&limit=&offset=`) |
 
 ### Developer Documentation

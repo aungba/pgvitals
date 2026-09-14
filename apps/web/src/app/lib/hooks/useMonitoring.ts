@@ -32,15 +32,16 @@ export function useOverview(
 
 export function useSnapshots(
   dbId: string,
-  limit = 200,
+  limit = 500,
   from?: string,
   to?: string,
   token?: string,
+  timeframe?: string,
   options?: Partial<UseQueryOptions<Snapshot[], Error>>
 ) {
   return useQuery<Snapshot[], Error>({
-    queryKey: ["snapshots", dbId, limit, from, to, token],
-    queryFn: () => getSnapshots(dbId, limit, from, to, token),
+    queryKey: ["snapshots", dbId, limit, from, to, token, timeframe],
+    queryFn: () => getSnapshots(dbId, limit, from, to, token, timeframe),
     enabled: !!dbId,
     refetchInterval: 15_000,
     ...options,
