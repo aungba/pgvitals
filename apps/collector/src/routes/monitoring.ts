@@ -253,7 +253,7 @@ export default async function monitoringRoutes(app: FastifyInstance): Promise<vo
           const refDate = new Date(targetSnapshot.timestamp);
           const nearbyRows = await db
             .select({
-              snapshotId: snapshots.id,
+              id: snapshots.id,
               timestamp: snapshots.timestamp,
             })
             .from(snapshots)
