@@ -37,4 +37,36 @@ describe("SQL-Aware Index & Query Advisor", () => {
     expect(advice.equalityColumns).toEqual([]);
     expect(advice.recommendedIndexDdl).toBeNull();
   });
+
+  it("strips table and alias prefixes from columns and partial predicates", () => {
+    const sql = `SELECT t.t2, t.t3, t.t6 FROM "tnt031" t WHERE t.t2 = $1 AND t.t3 = $2 AND t.t7 IS NULL`;
+    const advice = analyzeSqlAdvice(sql, 1000, 5.0);
+
+    expect(advice.tableName).toBe("tnt031");
+    expect(advice.equalityColumns).toEqual(["t2", "t3"]);
+    expect(advice.partialConditions).toEqual(["t7 IS NULL"]);
+    expect(advice.indexName).not.toContain(".");
+    expect(advice.recommendedIndexDdl).toBe(
+      `CREATE INDEX CONCURRENTLY idx_tnt031_t2_t3_opt ON "tnt031" (t2, t3) INCLUDE (t6) WHERE t7 IS NULL;`
+    );
+  });
+
+  it("handles multi-table queries without cross-table column contamination or dots in index name", () => {
+    const sql = `SELECT tnt031.syskey FROM "tnt031" JOIN tnt025 ON tnt031.tnt025_syskey = tnt025.syskey JOIN rms047 ON tnt031.rms047_syskey = rms047.syskey WHERE tnt025.syskey = $1 AND rms047.syskey = $2 AND tnt031.t7 IS NULL`;
+    const advice = analyzeSqlAdvice(sql, 20_000, 12.0);
+
+    // Filtered tables are tnt025 and rms047; tnt031 only has a partial condition
+    expect(["tnt025", "rms047"]).toContain(advice.tableName);
+    expect(advice.equalityColumns).toEqual(["syskey"]);
+    expect(advice.indexName).not.toContain(".");
+
+    // Ensure all recommendations are strictly single-table and have no dots in index names
+    expect(advice.allRecommendations?.length).toBeGreaterThanOrEqual(2);
+    for (const rec of advice.allRecommendations ?? []) {
+      expect(rec.indexName).not.toContain(".");
+      expect(rec.recommendedIndexDdl).not.toContain("..");
+      // Must not contain cross-table column dots like (tnt025.syskey)
+      expect(rec.recommendedIndexDdl).not.toMatch(/\([a-zA-Z0-9_]+\.[a-zA-Z0-9_]+/);
+    }
+  });
 });

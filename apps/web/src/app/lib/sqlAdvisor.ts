@@ -4,6 +4,12 @@
    to generate production-safe index DDL and calculate CPU savings.
    =================================================================== */
 
+export interface RecommendedIndex {
+  tableName: string;
+  recommendedIndexDdl: string;
+  indexName: string;
+}
+
 export interface SqlAdvice {
   tableName: string | null;
   equalityColumns: string[];
@@ -16,10 +22,81 @@ export interface SqlAdvice {
   estimatedSavingsHours: number;
   estimatedSavingsPct: number;
   targetLatencyMs: number;
+  allRecommendations?: RecommendedIndex[];
+}
+
+interface TableRef {
+  tableName: string;
+  alias: string;
+}
+
+interface TableAnalysis {
+  tableName: string;
+  equalityColumns: string[];
+  rangeColumns: string[];
+  partialConditions: string[];
+  projectionColumns: string[];
+}
+
+interface ParsedColumn {
+  prefix: string | null;
+  columnName: string;
 }
 
 function cleanIdentifier(id: string): string {
   return id.replace(/["'`]/g, "").trim();
+}
+
+function parseColumnIdentifier(raw: string): ParsedColumn {
+  const cleaned = cleanIdentifier(raw);
+  if (cleaned.includes(".")) {
+    const parts = cleaned.split(".");
+    const columnName = parts.pop()!;
+    const prefix = parts.pop() || null;
+    return { prefix, columnName };
+  }
+  return { prefix: null, columnName: cleaned };
+}
+
+function extractTableRefs(sql: string): TableRef[] {
+  const tables: TableRef[] = [];
+  const seen = new Set<string>();
+
+  const regex = /\b(?:FROM|JOIN|UPDATE|INTO)\s+([a-zA-Z0-9_".]+)(?:\s+(?:AS\s+)?(?!(?:WHERE|ON|JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|FULL|SET|GROUP|ORDER|HAVING|LIMIT|OFFSET|USING|WINDOW|SELECT)\b)([a-zA-Z0-9_"]+))?/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(sql)) !== null) {
+    let rawTable = match[1].replace(/["'`]/g, "").trim();
+    if (rawTable.includes(".")) {
+      rawTable = rawTable.split(".").pop() || rawTable;
+    }
+    if (!rawTable || rawTable.length < 2) continue;
+
+    const alias = match[2] ? match[2].replace(/["'`]/g, "").trim() : rawTable;
+
+    const key = `${rawTable.toLowerCase()}:${alias.toLowerCase()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      tables.push({ tableName: rawTable, alias });
+    }
+  }
+
+  return tables;
+}
+
+function findTargetTable(parsed: ParsedColumn, tables: TableRef[]): TableRef | null {
+  if (tables.length === 0) return null;
+
+  if (parsed.prefix) {
+    const pLower = parsed.prefix.toLowerCase();
+    const found = tables.find(
+      (t) => t.alias.toLowerCase() === pLower || t.tableName.toLowerCase() === pLower
+    );
+    if (found) return found;
+    if (tables.length > 1) return null;
+  }
+
+  return tables[0];
 }
 
 export function analyzeSqlAdvice(
@@ -36,16 +113,19 @@ export function analyzeSqlAdvice(
       ? Math.min(99, Math.round(((meanTimeMs - targetLatencyMs) / meanTimeMs) * 100))
       : 0;
 
-  // 1. Extract Table Name
-  let tableName: string | null = null;
-  const tableMatch = sql.match(/\b(?:FROM|JOIN|UPDATE|INTO)\s+([a-zA-Z0-9_."]+)/i);
-  if (tableMatch) {
-    let raw = tableMatch[1].replace(/["']/g, "");
-    if (raw.includes(".")) {
-      raw = raw.split(".").pop() || raw;
-    }
-    if (raw.length > 1) {
-      tableName = raw;
+  // 1. Extract Target Tables
+  const tables = extractTableRefs(sql);
+  const tableMap = new Map<string, TableAnalysis>();
+
+  for (const t of tables) {
+    if (!tableMap.has(t.tableName)) {
+      tableMap.set(t.tableName, {
+        tableName: t.tableName,
+        equalityColumns: [],
+        rangeColumns: [],
+        partialConditions: [],
+        projectionColumns: [],
+      });
     }
   }
 
@@ -53,11 +133,7 @@ export function analyzeSqlAdvice(
   const whereMatch = sql.match(/\bWHERE\s+([\s\S]+?)(?:\s+(?:GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET)|$)/i);
   const whereClause = whereMatch ? whereMatch[1].trim() : "";
 
-  const equalityColumns: string[] = [];
-  const rangeColumns: string[] = [];
-  const partialConditions: string[] = [];
-
-  if (whereClause) {
+  if (whereClause && tables.length > 0) {
     const predicates = whereClause.split(/\s+AND\s+/i);
 
     for (const pred of predicates) {
@@ -66,9 +142,13 @@ export function analyzeSqlAdvice(
       // Equality: col = $1 or col = 'val'
       const eqMatch = trimmed.match(/^([a-zA-Z0-9_."]+)\s*=\s*(.+)$/i);
       if (eqMatch) {
-        const col = cleanIdentifier(eqMatch[1]);
-        if (!equalityColumns.includes(col)) {
-          equalityColumns.push(col);
+        const parsed = parseColumnIdentifier(eqMatch[1]);
+        const target = findTargetTable(parsed, tables);
+        if (target) {
+          const analysis = tableMap.get(target.tableName);
+          if (analysis && !analysis.equalityColumns.includes(parsed.columnName)) {
+            analysis.equalityColumns.push(parsed.columnName);
+          }
         }
         continue;
       }
@@ -76,9 +156,13 @@ export function analyzeSqlAdvice(
       // Range or IN: col IN (...) or col > $1 or col < $1
       const inOrRangeMatch = trimmed.match(/^([a-zA-Z0-9_."]+)\s+(?:IN\s*\(|>|<|>=|<=|BETWEEN)\s*(.+)$/i);
       if (inOrRangeMatch) {
-        const col = cleanIdentifier(inOrRangeMatch[1]);
-        if (!rangeColumns.includes(col) && !equalityColumns.includes(col)) {
-          rangeColumns.push(col);
+        const parsed = parseColumnIdentifier(inOrRangeMatch[1]);
+        const target = findTargetTable(parsed, tables);
+        if (target) {
+          const analysis = tableMap.get(target.tableName);
+          if (analysis && !analysis.rangeColumns.includes(parsed.columnName) && !analysis.equalityColumns.includes(parsed.columnName)) {
+            analysis.rangeColumns.push(parsed.columnName);
+          }
         }
         continue;
       }
@@ -86,42 +170,60 @@ export function analyzeSqlAdvice(
       // Partial condition: col IS NOT NULL or col IS NULL
       const nullMatch = trimmed.match(/^([a-zA-Z0-9_."]+)\s+(IS\s+NOT\s+NULL|IS\s+NULL)$/i);
       if (nullMatch) {
-        const col = cleanIdentifier(nullMatch[1]);
-        const cond = nullMatch[2].toUpperCase();
-        partialConditions.push(`${col} ${cond}`);
+        const parsed = parseColumnIdentifier(nullMatch[1]);
+        const target = findTargetTable(parsed, tables);
+        if (target) {
+          const analysis = tableMap.get(target.tableName);
+          const cond = `${parsed.columnName} ${nullMatch[2].toUpperCase()}`;
+          if (analysis && !analysis.partialConditions.includes(cond)) {
+            analysis.partialConditions.push(cond);
+          }
+        }
         continue;
       }
     }
   }
 
   // 3. Extract Projections (SELECT col1, col2 FROM ...)
-  const projectionColumns: string[] = [];
   const selectMatch = sql.match(/^\s*SELECT\s+([\s\S]+?)\s+FROM\s+/i);
-  if (selectMatch) {
+  if (selectMatch && tables.length > 0) {
     const rawCols = selectMatch[1].split(",");
     for (const c of rawCols) {
-      const colClean = cleanIdentifier(c.trim());
-      if (colClean && colClean !== "*" && !colClean.includes("(") && !colClean.includes(")")) {
-        const baseCol = colClean.includes(".") ? colClean.split(".").pop()! : colClean;
-        if (!projectionColumns.includes(baseCol)) {
-          projectionColumns.push(baseCol);
+      const trimmedCol = c.trim();
+      if (!trimmedCol || trimmedCol === "*" || trimmedCol.includes("(") || trimmedCol.includes(")")) {
+        continue;
+      }
+      const parsed = parseColumnIdentifier(trimmedCol);
+      const target = findTargetTable(parsed, tables);
+      if (target) {
+        const analysis = tableMap.get(target.tableName);
+        if (analysis && !analysis.projectionColumns.includes(parsed.columnName)) {
+          analysis.projectionColumns.push(parsed.columnName);
         }
       }
     }
   }
 
-  // 4. Generate Recommended Index DDL
-  let recommendedIndexDdl: string | null = null;
-  let indexName: string | null = null;
+  // Helper to build safe DDL for a specific table
+  function buildIndexDdl(analysis: TableAnalysis): { ddl: string | null; indexName: string | null } {
+    const { tableName, equalityColumns, rangeColumns, partialConditions, projectionColumns } = analysis;
+    if (equalityColumns.length === 0 && rangeColumns.length === 0) {
+      return { ddl: null, indexName: null };
+    }
 
-  if (tableName && (equalityColumns.length > 0 || rangeColumns.length > 0)) {
     const indexCols = [...equalityColumns, ...rangeColumns];
     const indexColStr = indexCols.join(", ");
 
     const includeCols = projectionColumns.filter((p) => !indexCols.includes(p));
 
-    const shortColName = indexCols.slice(0, 2).join("_");
-    indexName = `idx_${tableName}_${shortColName}_opt`;
+    const shortColName = indexCols
+      .slice(0, 2)
+      .map((c) => c.replace(/[^a-zA-Z0-9_]/g, "_"))
+      .join("_")
+      .replace(/_+/g, "_");
+
+    const cleanTableName = tableName.replace(/[^a-zA-Z0-9_]/g, "_");
+    const indexName = `idx_${cleanTableName}_${shortColName}_opt`;
 
     let ddl = `CREATE INDEX CONCURRENTLY ${indexName} ON "${tableName}" (${indexColStr})`;
 
@@ -134,20 +236,65 @@ export function analyzeSqlAdvice(
     }
 
     ddl += `;`;
-    recommendedIndexDdl = ddl;
+    return { ddl, indexName };
+  }
+
+  // 4. Select the best table to recommend an index for
+  const analyses = Array.from(tableMap.values());
+  let chosenAnalysis: TableAnalysis | null = null;
+
+  if (analyses.length > 0) {
+    const primary = analyses[0];
+    if (primary.equalityColumns.length > 0 || primary.rangeColumns.length > 0) {
+      chosenAnalysis = primary;
+    } else {
+      const filtered = analyses.filter((a) => a.equalityColumns.length > 0 || a.rangeColumns.length > 0);
+      if (filtered.length > 0) {
+        chosenAnalysis = filtered.reduce((prev, curr) =>
+          curr.equalityColumns.length + curr.rangeColumns.length >
+          prev.equalityColumns.length + prev.rangeColumns.length
+            ? curr
+            : prev
+        );
+      } else {
+        chosenAnalysis = primary;
+      }
+    }
+  }
+
+  const allRecommendations: RecommendedIndex[] = [];
+  for (const a of analyses) {
+    const { ddl, indexName } = buildIndexDdl(a);
+    if (ddl && indexName) {
+      allRecommendations.push({
+        tableName: a.tableName,
+        recommendedIndexDdl: ddl,
+        indexName,
+      });
+    }
+  }
+
+  let recommendedIndexDdl: string | null = null;
+  let indexName: string | null = null;
+
+  if (chosenAnalysis) {
+    const res = buildIndexDdl(chosenAnalysis);
+    recommendedIndexDdl = res.ddl;
+    indexName = res.indexName;
   }
 
   return {
-    tableName,
-    equalityColumns,
-    rangeColumns,
-    partialConditions,
-    projectionColumns,
+    tableName: chosenAnalysis?.tableName ?? null,
+    equalityColumns: chosenAnalysis?.equalityColumns ?? [],
+    rangeColumns: chosenAnalysis?.rangeColumns ?? [],
+    partialConditions: chosenAnalysis?.partialConditions ?? [],
+    projectionColumns: chosenAnalysis?.projectionColumns ?? [],
     recommendedIndexDdl,
     indexName,
     totalTimeHours,
     estimatedSavingsHours,
     estimatedSavingsPct,
     targetLatencyMs,
+    allRecommendations,
   };
 }

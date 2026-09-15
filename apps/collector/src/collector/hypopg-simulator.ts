@@ -84,9 +84,12 @@ export async function simulateIndex(
     return null;
   }
 
-  // Extract table name from DDL (e.g. "CREATE INDEX ON users(email)" -> "users")
-  const tableMatch = indexDdl.match(/ON\s+(?:\w+\.)?(\w+)/i);
+  // Extract table name from DDL (e.g. "CREATE INDEX ON users(email)" -> "users", handles quotes)
+  const tableMatch = indexDdl.match(/ON\s+(?:[a-zA-Z0-9_".]+\.)?["']?([a-zA-Z0-9_]+)["']?/i);
   const tableName = tableMatch?.[1] ?? "unknown";
+
+  // HypoPG creates hypothetical in-memory indexes and rejects the CONCURRENTLY keyword
+  const hypopgDdl = indexDdl.replace(/\bCONCURRENTLY\s+/i, "");
 
   // Use a single connection — HypoPG hypothetical indexes are session-scoped
   const client = postgres(connectionString, {
@@ -109,7 +112,7 @@ export async function simulateIndex(
 
     // 2. Create hypothetical index (session-scoped, no disk write)
     await client.unsafe(
-      `SELECT * FROM hypopg_create_index('${indexDdl.replace(/'/g, "''")}')`
+      `SELECT * FROM hypopg_create_index('${hypopgDdl.replace(/'/g, "''")}')`
     );
 
     // 3. EXPLAIN with hypothetical index (same session)
@@ -156,9 +159,10 @@ export async function simulateIndex(
     );
 
     return result;
-  } catch (err) {
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
     log.warn({ err, indexDdl, testQuery }, "HypoPG simulation failed");
-    return null;
+    throw new Error(errorMsg);
   } finally {
     await client.end({ timeout: 5 });
   }

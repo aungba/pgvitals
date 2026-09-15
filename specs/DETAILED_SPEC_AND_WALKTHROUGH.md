@@ -618,11 +618,13 @@ Generates unique strings per alert type:
 
 Parses SQL statements from `pg_stat_statements` and query suggestions to generate tailored, non-blocking index recommendations and quantify execution savings both server-side (collector) and client-side (web):
 
-1. **Predicate Extraction**: Extracts equality WHERE columns, range/IN filters, and partial conditions (e.g. `IS NOT NULL`, `IS NULL`).
-2. **Projection Extraction**: Extracts selected columns to recommend covering indexes via `INCLUDE (...)` for Index-Only Scans with zero heap fetches.
-3. **DDL Generation**: Produces safe `CREATE INDEX CONCURRENTLY idx_{table}_{cols}_opt ON "{table}" (...) INCLUDE (...) WHERE ...;`.
-4. **Quantified Savings**: Calculates cumulative database execution time in hours (`calls * meanTimeMs`) and estimated savings percentage based on target index lookup latency (~0.05ms).
-5. **Frontend Integration**: Provides one-click `📋 Copy DDL`, `🧪 Test in HypoPG`, and `🗂️ View in Index Advisor` actions on suggestion cards and the Statement Inspector drawer.
+1. **Table & Alias Disambiguation**: Extracts all target relations and table aliases across `FROM`, `JOIN`, `UPDATE`, and `INTO` clauses. Uses keyword-guarded negative lookaheads to prevent reserved SQL words (e.g. `JOIN`, `ON`, `WHERE`) from being erroneously consumed as table aliases.
+2. **Predicate Assignment & Prefix Stripping**: Parses column identifiers into `{ prefix, columnName }` and assigns predicates strictly to the table they belong to. Completely strips table and alias qualifiers (`tbl.col` -> `col`) from index columns and partial `WHERE` predicates (`tbl.t7 IS NULL` -> `t7 IS NULL`), eliminating cross-table column pollution in multi-table queries.
+3. **Projection Extraction**: Extracts selected columns to recommend covering indexes via `INCLUDE (...)` for Index-Only Scans with zero heap fetches, associating projections with their matching source tables.
+4. **Clean DDL & Identifier Generation**: Sanitizes index names to strictly alphanumeric characters and underscores (`idx_{table}_{cols}_opt`), preventing unquoted dots (`.`) from breaking PostgreSQL grammar. Generates safe `CREATE INDEX CONCURRENTLY idx_{table}_{cols}_opt ON "{table}" (...) INCLUDE (...) WHERE ...;`.
+5. **Multi-Table Support**: Prioritizes tables with active equality/range filters, and exposes `allRecommendations` with per-table DDL suggestions for complex multi-table joins.
+6. **Quantified Savings**: Calculates cumulative database execution time in hours (`calls * meanTimeMs`) and estimated savings percentage based on target index lookup latency (~0.05ms).
+7. **Frontend Integration**: Provides one-click `📋 Copy DDL`, `🧪 Test in HypoPG`, and `🗂️ View in Index Advisor` actions on suggestion cards and the Statement Inspector drawer.
 
 ### 6.8c Query Suggestions Engine & Statement-Aware Optimizer
 
@@ -666,12 +668,15 @@ Both modes clear previous un-dismissed recommendations before regenerating.
 Allows users to simulate hypothetical indexes using the HypoPG extension (opt-in):
 
 1. Checks if HypoPG extension is installed (`SELECT * FROM hypopg()`)
-2. Creates a session-scoped hypothetical index via `SELECT hypopg_create_index(ddl)`
-3. Runs `EXPLAIN (FORMAT JSON)` on a user-provided test query before and after
-4. Compares plan costs and node types (e.g., Seq Scan → Index Scan)
-5. Cleans up via `SELECT hypopg_reset()`
-6. Returns: `costBefore`, `costAfter`, `costReductionPct`, `planBefore`, `planAfter`, `usesIndex`
-7. All operations use a single connection (HypoPG indexes are session-scoped)
+2. Automatically normalizes DDL by stripping `CONCURRENTLY` (since HypoPG hypothetical indexes are in-memory and reject `CONCURRENTLY`)
+3. Parses target table name supporting quoted identifiers (`ON "table"`)
+4. Creates a session-scoped hypothetical index via `SELECT hypopg_create_index(ddl)`
+5. Runs `EXPLAIN (FORMAT JSON)` on a user-provided test query before and after
+6. Compares plan costs and node types (e.g., Seq Scan → Index Scan)
+7. Cleans up via `SELECT hypopg_reset()`
+8. Returns: `costBefore`, `costAfter`, `costReductionPct`, `planBefore`, `planAfter`
+9. Propagates underlying database error diagnostics on simulation failures
+10. All operations use a single connection (HypoPG indexes are session-scoped)
 
 Exposed via `POST /api/databases/:id/indexes/simulate` with `{ indexDdl, testQuery }` body.
 

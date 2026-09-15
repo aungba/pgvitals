@@ -129,6 +129,7 @@ Located at: `/databases/[id]/indexes`
 ### 4.3 HypoPG Hypothetical Simulation
 - Test whether a recommended index will actually improve your query without creating physical indexes on disk.
 - Enter a test query and click **"Test in HypoPG"** to simulate planner cost before and after.
+- You can test `CREATE INDEX CONCURRENTLY` statements directly — PG Vitals automatically normalizes the DDL for HypoPG in-memory simulation, while keeping `CONCURRENTLY` intact for production copying.
 
 ### 4.4 Invalid Index Cleanup (`indisvalid = false`)
 - Scans `pg_index` for indexes left invalid or unready due to interrupted `CREATE INDEX CONCURRENTLY` commands.

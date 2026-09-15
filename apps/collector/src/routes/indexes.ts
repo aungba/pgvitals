@@ -227,7 +227,14 @@ export default async function indexRoutes(app: FastifyInstance): Promise<void> {
           });
         }
 
-        const result = await simulateIndex(connectionString, indexDdl, testQuery, request.log);
+        let result;
+        try {
+          result = await simulateIndex(connectionString, indexDdl, testQuery, request.log);
+        } catch (simErr: unknown) {
+          const msg = simErr instanceof Error ? simErr.message : String(simErr);
+          return reply.status(400).send({ error: `Simulation failed: ${msg}` });
+        }
+
         if (!result) {
           return reply.status(400).send({ error: "Simulation failed — check that the DDL and query are valid" });
         }
